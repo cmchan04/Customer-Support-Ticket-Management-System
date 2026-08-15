@@ -1,0 +1,174 @@
+{
+  "artifact_dir": "E:\\APU\\FYP_TP068983\\artifacts\\models",
+  "dataset_summary": {
+    "duplicates_removed": 0,
+    "english_rows": 16338,
+    "invalid_rows_removed": 0,
+    "prepared_rows": 16338,
+    "priority_classes": 3,
+    "queue_classes": 10,
+    "source_rows": 28587
+  },
+  "priority": {
+    "best_params": {
+      "classifier__C": 10.0,
+      "tfidf__max_df": 1.0,
+      "tfidf__min_df": 1,
+      "tfidf__ngram_range": [
+        1,
+        3
+      ]
+    },
+    "candidate_results": [
+      {
+        "best_params": {
+          "classifier__C": 10.0,
+          "tfidf__max_df": 1.0,
+          "tfidf__min_df": 1,
+          "tfidf__ngram_range": [
+            1,
+            3
+          ]
+        },
+        "cv_accuracy": 0.7195103289977046,
+        "cv_macro_f1": 0.7081750647915296,
+        "holdout_accuracy": 0.7451040391676866,
+        "holdout_macro_f1": 0.7361971283239263,
+        "model": "logistic_regression"
+      },
+      {
+        "best_params": {
+          "classifier__alpha": 0.1,
+          "tfidf__max_df": 1.0,
+          "tfidf__min_df": 1,
+          "tfidf__ngram_range": [
+            1,
+            3
+          ]
+        },
+        "cv_accuracy": 0.6947207345065034,
+        "cv_macro_f1": 0.6696283169337145,
+        "holdout_accuracy": 0.7105263157894737,
+        "holdout_macro_f1": 0.6911332529211527,
+        "model": "multinomial_naive_bayes"
+      },
+      {
+        "best_params": {
+          "classifier__C": 10.0,
+          "tfidf__max_df": 1.0,
+          "tfidf__min_df": 1,
+          "tfidf__ngram_range": [
+            1,
+            3
+          ]
+        },
+        "cv_accuracy": 0.7351185921958685,
+        "cv_macro_f1": 0.7238627777853346,
+        "holdout_accuracy": 0.7604039167686658,
+        "holdout_macro_f1": 0.7527797121509634,
+        "model": "linear_svm"
+      }
+    ],
+    "cv_macro_f1": 0.7238627777853346,
+    "holdout_metrics": {
+      "accuracy": 0.7604039167686658,
+      "high_priority_recall": 0.8102362204724409,
+      "macro_f1": 0.7527797121509634,
+      "macro_precision": 0.764471267290765,
+      "macro_recall": 0.7449054476444927,
+      "weighted_f1": 0.759427631311355,
+      "weighted_precision": 0.7610839137985878,
+      "weighted_recall": 0.7604039167686658
+    },
+    "misclassified_count": 783,
+    "selected_model": "linear_svm"
+  },
+  "quality_gate": {
+    "minimum_accuracy": 0.9,
+    "passed": false,
+    "targets": {
+      "priority": {
+        "accuracy": 0.7604039167686658,
+        "passed": false
+      },
+      "queue": {
+        "accuracy": 0.7539779681762546,
+        "passed": false
+      }
+    }
+  },
+  "queue": {
+    "best_params": {
+      "classifier__C": 10.0,
+      "tfidf__max_df": 1.0,
+      "tfidf__min_df": 1,
+      "tfidf__ngram_range": [
+        1,
+        3
+      ]
+    },
+    "candidate_results": [
+      {
+        "best_params": {
+          "classifier__C": 10.0,
+          "tfidf__max_df": 1.0,
+          "tfidf__min_df": 1,
+          "tfidf__ngram_range": [
+            1,
+            3
+          ]
+        },
+        "cv_accuracy": 0.6745983167559295,
+        "cv_macro_f1": 0.6845227564474371,
+        "holdout_accuracy": 0.7197062423500612,
+        "holdout_macro_f1": 0.7318998743957602,
+        "model": "logistic_regression"
+      },
+      {
+        "best_params": {
+          "classifier__alpha": 0.1,
+          "tfidf__max_df": 1.0,
+          "tfidf__min_df": 1,
+          "tfidf__ngram_range": [
+            1,
+            3
+          ]
+        },
+        "cv_accuracy": 0.5753634276970161,
+        "cv_macro_f1": 0.4606827587382584,
+        "holdout_accuracy": 0.6012851897184822,
+        "holdout_macro_f1": 0.47771058610604034,
+        "model": "multinomial_naive_bayes"
+      },
+      {
+        "best_params": {
+          "classifier__C": 10.0,
+          "tfidf__max_df": 1.0,
+          "tfidf__min_df": 1,
+          "tfidf__ngram_range": [
+            1,
+            3
+          ]
+        },
+        "cv_accuracy": 0.7082631981637337,
+        "cv_macro_f1": 0.713161183003668,
+        "holdout_accuracy": 0.7539779681762546,
+        "holdout_macro_f1": 0.7643564286324667,
+        "model": "linear_svm"
+      }
+    ],
+    "cv_macro_f1": 0.713161183003668,
+    "holdout_metrics": {
+      "accuracy": 0.7539779681762546,
+      "macro_f1": 0.7643564286324667,
+      "macro_precision": 0.8143540003567328,
+      "macro_recall": 0.7282756308028322,
+      "weighted_f1": 0.7535334646304057,
+      "weighted_precision": 0.757816614902096,
+      "weighted_recall": 0.7539779681762546
+    },
+    "misclassified_count": 804,
+    "selected_model": "linear_svm"
+  },
+  "report_dir": "E:\\APU\\FYP_TP068983\\resources\\model_output"
+}

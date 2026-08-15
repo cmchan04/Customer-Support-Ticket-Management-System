@@ -1,5 +1,3 @@
-"""Compatibility launcher for the modular ticket_ml command-line interface."""
-
 from ticket_ml.cli import main
 
 if __name__ == "__main__":

@@ -222,3 +222,7 @@ __marimo__/
 # Data csv files
 *.csv
 resources/data/
+
+# Reproducible model binaries and temporary training cache
+artifacts/models/
+artifacts/cache/

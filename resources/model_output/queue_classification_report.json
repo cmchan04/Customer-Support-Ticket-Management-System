@@ -1,0 +1,75 @@
+{
+  "Billing and Payments": {
+    "f1-score": 0.8984126984126984,
+    "precision": 0.909967845659164,
+    "recall": 0.8871473354231975,
+    "support": 319.0
+  },
+  "Customer Service": {
+    "f1-score": 0.7157676348547718,
+    "precision": 0.7142857142857143,
+    "recall": 0.7172557172557172,
+    "support": 481.0
+  },
+  "General Inquiry": {
+    "f1-score": 0.8,
+    "precision": 1.0,
+    "recall": 0.6666666666666666,
+    "support": 48.0
+  },
+  "Human Resources": {
+    "f1-score": 0.7540983606557377,
+    "precision": 0.8679245283018868,
+    "recall": 0.6666666666666666,
+    "support": 69.0
+  },
+  "IT Support": {
+    "f1-score": 0.6913907284768211,
+    "precision": 0.7131147540983607,
+    "recall": 0.6709511568123393,
+    "support": 389.0
+  },
+  "Product Support": {
+    "f1-score": 0.6969943135662063,
+    "precision": 0.6964285714285714,
+    "recall": 0.697560975609756,
+    "support": 615.0
+  },
+  "Returns and Exchanges": {
+    "f1-score": 0.7491638795986622,
+    "precision": 0.8296296296296296,
+    "recall": 0.6829268292682927,
+    "support": 164.0
+  },
+  "Sales and Pre-Sales": {
+    "f1-score": 0.7032967032967034,
+    "precision": 0.810126582278481,
+    "recall": 0.6213592233009708,
+    "support": 103.0
+  },
+  "Service Outages and Maintenance": {
+    "f1-score": 0.8593155893536122,
+    "precision": 0.8692307692307693,
+    "recall": 0.849624060150376,
+    "support": 133.0
+  },
+  "Technical Support": {
+    "f1-score": 0.7751243781094528,
+    "precision": 0.7328316086547507,
+    "recall": 0.82259767687434,
+    "support": 947.0
+  },
+  "accuracy": 0.7539779681762546,
+  "macro avg": {
+    "f1-score": 0.7643564286324667,
+    "precision": 0.8143540003567328,
+    "recall": 0.7282756308028322,
+    "support": 3268.0
+  },
+  "weighted avg": {
+    "f1-score": 0.7535334646304057,
+    "precision": 0.757816614902096,
+    "recall": 0.7539779681762546,
+    "support": 3268.0
+  }
+}
