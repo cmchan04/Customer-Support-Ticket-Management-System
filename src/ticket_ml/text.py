@@ -49,9 +49,13 @@ def ensure_nltk_resources() -> None:
         raise RuntimeError(f"Missing NLTK resources: {joined}. Run `ticket-ml setup-nltk` first.")
 
 
-def preprocess_ticket_text(subject: object, body: object) -> str:
+def preprocess_ticket_text(subject: object, body: object, *, subject_weight: int = 1) -> str:
     """Create the documented normalized text representation from ticket input."""
-    raw_text = f"{'' if pd.isna(subject) else subject} {'' if pd.isna(body) else body}"
+    if subject_weight < 1:
+        raise ValueError("subject_weight must be at least 1.")
+    subject_text = "" if pd.isna(subject) else str(subject)
+    body_text = "" if pd.isna(body) else str(body)
+    raw_text = " ".join([subject_text] * subject_weight + [body_text])
     text = re.sub(r"\\[nrt]+", " ", raw_text)
     text = re.sub(r"[\r\n\t]+", " ", text)
     text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
@@ -67,16 +71,25 @@ def preprocess_ticket_text(subject: object, body: object) -> str:
 class TicketTextPreprocessor(BaseEstimator, TransformerMixin):
     """scikit-learn transformer that makes subject/body text inference-safe."""
 
+    def __init__(self, *, subject_weight: int = 1) -> None:
+        self.subject_weight = subject_weight
+
     def fit(self, x: pd.DataFrame, y: object = None) -> TicketTextPreprocessor:
+        subject_weight = getattr(self, "subject_weight", 1)
+        if subject_weight < 1:
+            raise ValueError("subject_weight must be at least 1.")
         self._validate_input(x)
         return self
 
     def transform(self, x: pd.DataFrame) -> list[str]:
         self._validate_input(x)
+        # Models saved before subject weighting was introduced do not contain
+        # this attribute. Defaulting to 1 preserves their original behaviour.
+        subject_weight = getattr(self, "subject_weight", 1)
         subjects: Iterable[object] = x["subject"]
         bodies: Iterable[object] = x["body"]
         return [
-            preprocess_ticket_text(subject, body)
+            preprocess_ticket_text(subject, body, subject_weight=subject_weight)
             for subject, body in zip(subjects, bodies, strict=True)
         ]
 

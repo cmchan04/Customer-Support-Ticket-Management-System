@@ -20,6 +20,17 @@ def test_text_preprocessing_is_deterministic_and_removes_noise():
     assert "please" not in value
 
 
+def test_subject_weight_repeats_subject_without_changing_body_processing():
+    normal = preprocess_ticket_text("Account outage", "Service is unavailable.")
+    weighted = preprocess_ticket_text(
+        "Account outage", "Service is unavailable.", subject_weight=3
+    )
+
+    assert normal.count("account") == 1
+    assert weighted.count("account") == 3
+    assert weighted.count("service") == 1
+
+
 def test_transformer_requires_subject_and_body_columns():
     with pytest.raises(ValueError, match="Missing text columns"):
         TicketTextPreprocessor().fit(pd.DataFrame({"body": ["text"]}))

@@ -26,6 +26,16 @@ class TrainingConfig:
     logistic_c: tuple[float, ...] = (0.5, 1.0)
     svm_c: tuple[float, ...] = (0.5, 1.0)
     nb_alpha: tuple[float, ...] = (0.1, 1.0)
+    decision_tree_max_depth: tuple[int, ...] = (10, 20)
+    decision_tree_min_samples_leaf: tuple[int, ...] = (1, 3)
+    xgboost_max_depth: tuple[int, ...] = (6, 10)
+    xgboost_n_estimators: tuple[int, ...] = (200, 400)
+    weighted_svm_subject_weights: tuple[int, ...] = (1, 2, 3, 4)
+    weighted_svm_c: float = 10.0
+    weighted_svm_character_weight: float = 0.5
+    weighted_svm_character_ngram_range: tuple[int, int] = (3, 5)
+    weighted_svm_character_min_df: int = 2
+    weighted_svm_character_max_features: int = 50_000
 
     @classmethod
     def from_toml(cls, config_path: str | Path) -> TrainingConfig:
@@ -60,6 +70,28 @@ class TrainingConfig:
             logistic_c=tuple(float(value) for value in search["logistic_c"]),
             svm_c=tuple(float(value) for value in search["svm_c"]),
             nb_alpha=tuple(float(value) for value in search["nb_alpha"]),
+            decision_tree_max_depth=tuple(
+                int(value) for value in search["decision_tree_max_depth"]
+            ),
+            decision_tree_min_samples_leaf=tuple(
+                int(value) for value in search["decision_tree_min_samples_leaf"]
+            ),
+            xgboost_max_depth=tuple(int(value) for value in search["xgboost_max_depth"]),
+            xgboost_n_estimators=tuple(
+                int(value) for value in search["xgboost_n_estimators"]
+            ),
+            weighted_svm_subject_weights=tuple(
+                int(value) for value in search["weighted_svm_subject_weights"]
+            ),
+            weighted_svm_c=float(search["weighted_svm_c"]),
+            weighted_svm_character_weight=float(search["weighted_svm_character_weight"]),
+            weighted_svm_character_ngram_range=tuple(
+                int(value) for value in search["weighted_svm_character_ngram_range"]
+            ),
+            weighted_svm_character_min_df=int(search["weighted_svm_character_min_df"]),
+            weighted_svm_character_max_features=int(
+                search["weighted_svm_character_max_features"]
+            ),
         )
 
     def as_metadata(self) -> dict[str, object]:

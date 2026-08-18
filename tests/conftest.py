@@ -48,5 +48,9 @@ def smoke_training(
         logistic_c=(1.0,),
         svm_c=(1.0,),
         nb_alpha=(1.0,),
+        decision_tree_max_depth=(3,),
+        decision_tree_min_samples_leaf=(1,),
+        xgboost_max_depth=(3,),
+        xgboost_n_estimators=(5,),
     )
     return config, train_all(config)

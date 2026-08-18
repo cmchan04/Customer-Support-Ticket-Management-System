@@ -12,7 +12,7 @@ from ticket_ml.config import TrainingConfig
 from ticket_ml.eda import run_eda
 from ticket_ml.predictor import TicketPredictor
 from ticket_ml.text import download_nltk_resources
-from ticket_ml.training import train_all
+from ticket_ml.training import train_all, tune_weighted_svm
 
 
 def _default_config_path() -> Path:
@@ -32,6 +32,11 @@ def _parser() -> argparse.ArgumentParser:
     training = commands.add_parser("train", help="Train queue and priority models")
     training.add_argument("--config", type=Path, default=_default_config_path())
 
+    weighting = commands.add_parser(
+        "tune-weighting", help="Tune subject emphasis for the word/character Linear SVM"
+    )
+    weighting.add_argument("--config", type=Path, default=_default_config_path())
+
     prediction = commands.add_parser("predict", help="Predict one ticket's queue and priority")
     prediction.add_argument("--model-dir", type=Path, default=Path("artifacts/models"))
     prediction.add_argument("--subject", default="")
@@ -49,6 +54,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "train":
         summary = train_all(TrainingConfig.from_toml(args.config))
+        print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+        return 0
+    if args.command == "tune-weighting":
+        summary = tune_weighted_svm(TrainingConfig.from_toml(args.config))
         print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "eda":

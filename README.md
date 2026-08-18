@@ -96,11 +96,31 @@ ticket-ml eda --config configs\training.toml
 ```
 
 Train and evaluate all candidate models. This compares Logistic Regression,
-Multinomial Naive Bayes, and Linear SVM separately for `queue` and `priority`:
+Multinomial Naive Bayes, Linear SVM, Decision Tree, and CPU-based XGBoost
+separately for `queue` and `priority`:
 
 ```powershell
 ticket-ml train --config configs\training.toml
 ```
+
+Run the focused subject-weighting experiment. It compares subject-to-body text
+ratios of 1:1, 2:1, 3:1, and 4:1 using a word-and-character TF-IDF Linear SVM;
+the ratio is selected by five-fold cross-validation before one holdout test:
+
+```powershell
+ticket-ml tune-weighting --config configs\training.toml
+```
+
+Its independent reports are written to `resources/model_output/weighting_experiment/`
+and its experimental pipelines to `artifacts/models/experiments/weighted_svm/`.
+It does not overwrite the standard saved prediction models.
+
+The latest seed-29 weighting experiment selected a 1:1 subject-to-body ratio
+for both targets. Repeating the subject reduced cross-validation performance at
+every tested ratio. The word-and-character model reached 73.90% queue accuracy
+(versus 74.27% for the comparable word-only SVM) and 75.61% priority accuracy
+(versus 75.46%). It therefore does not provide a meaningful route to the 85%
+target on this dataset.
 
 Predict a queue and priority using the saved models:
 
@@ -122,9 +142,10 @@ ruff check src tests
 
 ## Training outputs and current result
 
-Training uses an 80/20 train/test split with seed `42`, then uses five-fold
-stratified cross-validation on the training portion. Macro F1 selects the best
-algorithm; the untouched 20% test portion provides the final reported metrics.
+Training uses an 80/20 train/test split with the configured random seed in
+`configs/training.toml`, then uses five-fold stratified cross-validation on the
+training portion. Macro F1 selects the best algorithm; the untouched 20% test
+portion provides the final reported metrics.
 
 The selected pipelines and reproducibility metadata are written to:
 
@@ -138,8 +159,8 @@ Reports, confusion matrices, ROC/precision-recall plots, and misclassification
 samples are written to `resources/model_output/`. Training replaces the model
 and report files with results from the new run.
 
-The current training run selected Linear SVM for both targets, with word 1--3
-grams and `C=10`:
+The stored baseline run (before Decision Tree and XGBoost were added) selected
+Linear SVM for both targets, with word 1--3 grams and `C=10`:
 
 | Target | Holdout accuracy | Macro F1 |
 | --- | ---: | ---: |
@@ -148,5 +169,9 @@ grams and `C=10`:
 
 High-priority recall is 81.02%. The configured 90% accuracy quality gate does
 not currently pass, so the result must not be presented as a 90%-accurate
-model. Inspect `resources/model_output/metrics.json` to compare every candidate
-algorithm's cross-validation and holdout results.
+model. Run the training command again to compare all five algorithms; it will
+replace `resources/model_output/metrics.json` with the updated candidate
+comparison and selected-model metrics. XGBoost is explicitly configured for
+CPU use, matching the rest of this project. Its default comparison uses a
+laptop-appropriate 100-tree, depth-6 configuration; its parameters can be
+adjusted in `configs/training.toml` if you later need a separate tuning study.
