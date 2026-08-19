@@ -15,7 +15,7 @@ const roleDefinitions = {
     initials: "AP",
     nav: [
       ["01", "My desk", "dashboard", "4"],
-      ["02", "Unassigned", "unassigned", "6"],
+      ["02", "Ticket Pool", "unassigned", "6"],
       ["03", "My tickets", "assigned", "4"],
       ["04", "Waiting for customer", "waiting", "3"],
     ],
@@ -46,6 +46,8 @@ const state = {
   accountMenuOpen: false,
   accountReturnPage: "dashboard",
   staffResolvedPeriod: "today",
+  ticketPoolFiltersOpen: false,
+  ticketPoolFilters: { priority: "all", type: "all" },
 };
 
 const customerTickets = [
@@ -371,6 +373,7 @@ function renderNewTicket() {
 
 function renderStaff() {
   const isMyDesk = state.page === "dashboard";
+  const isTicketPool = state.page === "unassigned";
   const staffName = getProfileDisplayName(getActiveProfile());
   const resolvedPeriod = getStaffResolvedPeriod();
   const assignedTickets = [
@@ -379,26 +382,59 @@ function renderStaff() {
     { id: "TKT-000119", subject: "System is slow after the latest update", customer: "Jessica Low", type: "Problem", priority: "Medium", status: ["Waiting for customer", "waiting"], updated: "Yesterday" },
     { id: "TKT-000104", subject: "Unable to install the desktop client", customer: "Mohd Firdaus", type: "Request", priority: "Low", status: ["In progress", "progress"], updated: "12 Aug" },
   ];
+  const ticketPoolTickets = [
+    { id: "TKT-000128", subject: "Unable to access the staff portal", customer: "Maya Lim", type: "Incident", priority: "High", updated: "18 min ago" },
+    { id: "TKT-000131", subject: "Cannot connect to the company VPN", customer: "Izzat Rahman", type: "Incident", priority: "High", updated: "34 min ago" },
+    { id: "TKT-000125", subject: "Desktop client opens to a blank screen", customer: "Priya Nair", type: "Problem", priority: "High", updated: "1 h ago" },
+    { id: "TKT-000120", subject: "Request access to the shared support mailbox", customer: "Ethan Lee", type: "Request", priority: "Medium", updated: "3 h ago" },
+    { id: "TKT-000116", subject: "Repeated sign-in prompt after update", customer: "Nur Aina", type: "Problem", priority: "Medium", updated: "Yesterday" },
+    { id: "TKT-000111", subject: "Need help configuring the desktop application", customer: "Kavitha Devi", type: "Request", priority: "Low", updated: "Yesterday" },
+  ];
   const renderAssignedRows = (tickets) => tickets.map((ticket) => `<tr><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${ticket.subject}</span><span class="muted">${ticket.customer} · ${ticket.type}</span></td><td>${priority(ticket.priority)}</td><td>${status(ticket.status[0], ticket.status[1])}</td><td>${staffName}</td><td class="muted">${ticket.updated}</td><td><button class="button secondary" data-action="open-ticket">Open</button></td></tr>`).join("");
+  const renderTicketPoolRows = (tickets) => tickets.length
+    ? tickets.map((ticket) => `<tr><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${ticket.subject}</span><span class="muted">${ticket.customer} · ${ticket.type}</span></td><td>${priority(ticket.priority)}</td><td class="muted">${ticket.updated}</td><td><button class="button signal" data-action="claim" data-ticket-id="${ticket.id}">Claim</button></td></tr>`).join("")
+    : '<tr><td colspan="5"><p class="table-empty">No Ticket Pool tickets match these filters.</p></td></tr>';
   const recentAssignedRows = renderAssignedRows(assignedTickets.slice(0, 3));
   const assignedRows = renderAssignedRows(assignedTickets);
-  const unassignedRows = `<tr><td><span class="ticket-code">TKT-000128</span></td><td><span class="ticket-subject">Unable to access the staff portal</span><span class="muted">Maya Lim · Incident</span></td><td>${priority("High")}</td><td>${status("Open", "open")}</td><td class="muted">Unassigned</td><td class="muted">18 min ago</td><td><button class="button signal" data-action="claim">Claim</button></td></tr>`;
+  const filteredTicketPoolTickets = ticketPoolTickets.filter((ticket) => (
+    (state.ticketPoolFilters.priority === "all" || ticket.priority === state.ticketPoolFilters.priority)
+    && (state.ticketPoolFilters.type === "all" || ticket.type === state.ticketPoolFilters.type)
+  ));
+  const unassignedRows = renderTicketPoolRows(filteredTicketPoolTickets);
   const waitingRows = renderAssignedRows(assignedTickets.filter((ticket) => ticket.status[0] === "Waiting for customer"));
-  const tableTitle = isMyDesk ? "My active tickets" : state.page === "assigned" ? "My tickets" : state.page === "waiting" ? "Waiting for customer" : "Unassigned tickets";
+  const tableTitle = isMyDesk ? "My active tickets" : isTicketPool ? "Technical Support tickets" : state.page === "assigned" ? "My tickets" : "Waiting for customer";
   const tableSubtitle = isMyDesk
     ? `The three most recently updated tickets assigned to ${staffName}.`
-    : state.page === "assigned"
+    : isTicketPool
+      ? "Unassigned tickets available for you to claim."
+      : state.page === "assigned"
       ? `All tickets currently assigned to ${staffName}.`
       : "Technical Support tickets in this view.";
-  const tableRows = isMyDesk ? recentAssignedRows : state.page === "assigned" ? assignedRows : state.page === "waiting" ? waitingRows : unassignedRows;
+  const tableRows = isMyDesk ? recentAssignedRows : isTicketPool ? unassignedRows : state.page === "assigned" ? assignedRows : waitingRows;
+  const tableHeaders = isTicketPool
+    ? "<th>Reference</th><th>Customer issue</th><th>Priority</th><th>Last updated</th><th></th>"
+    : "<th>Reference</th><th>Customer issue</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Last updated</th><th></th>";
+  const activeTicketPoolFilters = Number(state.ticketPoolFilters.priority !== "all") + Number(state.ticketPoolFilters.type !== "all");
+  const ticketPoolFilters = isTicketPool && state.ticketPoolFiltersOpen ? `
+    <div class="ticket-pool-filters" role="group" aria-label="Filter Technical Support tickets">
+      <label><span>Priority</span><select data-ticket-pool-filter="priority" aria-label="Filter by priority"><option value="all" ${state.ticketPoolFilters.priority === "all" ? "selected" : ""}>All priorities</option><option value="High" ${state.ticketPoolFilters.priority === "High" ? "selected" : ""}>High priority</option><option value="Medium" ${state.ticketPoolFilters.priority === "Medium" ? "selected" : ""}>Medium priority</option><option value="Low" ${state.ticketPoolFilters.priority === "Low" ? "selected" : ""}>Low priority</option></select></label>
+      <label><span>Ticket type</span><select data-ticket-pool-filter="type" aria-label="Filter by ticket type"><option value="all" ${state.ticketPoolFilters.type === "all" ? "selected" : ""}>All ticket types</option><option value="Incident" ${state.ticketPoolFilters.type === "Incident" ? "selected" : ""}>Incident</option><option value="Problem" ${state.ticketPoolFilters.type === "Problem" ? "selected" : ""}>Problem</option><option value="Request" ${state.ticketPoolFilters.type === "Request" ? "selected" : ""}>Request</option></select></label>
+      <button class="button text" type="button" data-action="clear-ticket-pool-filters">Clear filters</button>
+      <span class="ticket-pool-filter-count">Showing ${filteredTicketPoolTickets.length} of ${ticketPoolTickets.length} tickets</span>
+    </div>` : "";
   const tableAction = isMyDesk
     ? '<button class="button text panel-head-action" type="button" data-page="assigned">View all tickets</button>'
-    : '<button class="button secondary" type="button" data-action="filter">Filter list</button>';
-  const table = `<section class="panel table-panel"><div class="panel-head"><div><h2>${tableTitle}</h2><p>${tableSubtitle}</p></div>${tableAction}</div><table class="data-table"><thead><tr><th>Reference</th><th>Customer issue</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Last updated</th><th></th></tr></thead><tbody>${tableRows}</tbody></table></section>`;
+    : isTicketPool
+      ? `<button class="button secondary" type="button" data-action="toggle-ticket-pool-filters" aria-expanded="${state.ticketPoolFiltersOpen}">${activeTicketPoolFilters ? `Filters (${activeTicketPoolFilters})` : "Filter tickets"}</button>`
+      : '<button class="button secondary" type="button" data-action="filter">Filter list</button>';
+  const table = `<section class="panel table-panel"><div class="panel-head"><div><h2>${tableTitle}</h2><p>${tableSubtitle}</p></div>${tableAction}</div>${ticketPoolFilters}<table class="data-table"><thead><tr>${tableHeaders}</tr></thead><tbody>${tableRows}</tbody></table></section>`;
+  const queueBanner = `<section class="queue-banner"><div><span class="eyebrow">Your queue</span><h2>Technical Support</h2><p>System access, account, and technical troubleshooting requests.</p></div><div class="queue-count">QUEUE BACKLOG<strong>18</strong></div><div class="queue-count">UNASSIGNED<strong>6</strong></div><div class="queue-count">HIGH PRIORITY<strong>3</strong></div></section>`;
+  const deskMetrics = `<section class="metric-grid"><article class="metric-card"><span class="eyebrow">My active tickets</span><strong class="metric-value">4</strong><span class="metric-footer"><span class="trend warn">1</span> ticket waiting your reply</span></article><article class="metric-card"><span class="eyebrow">Pending closure</span><strong class="metric-value">2</strong><span class="metric-footer">Ready for your final review</span></article><article class="metric-card resolution-metric"><div class="metric-card-header"><span class="eyebrow">Tickets resolved</span><button class="metric-swap" type="button" data-action="cycle-staff-resolved-period" aria-label="Show the next resolved-ticket period" title="Show today, this week, or this month">↻</button></div><strong class="metric-value">${resolvedPeriod.value}</strong><span class="metric-footer"><span class="period-label">${resolvedPeriod.label}</span>${resolvedPeriod.detail}</span></article><article class="metric-card"><span class="eyebrow">Route corrections</span><strong class="metric-value">2</strong><span class="metric-footer"><span class="period-label">This week</span> Recorded for model review</span></article></section>`;
+  if (isTicketPool) return `<section class="ticket-pool-page">${queueBanner}${table}</section>`;
   return `
     <div class="page-heading"><div><span class="eyebrow">Technical Support</span><h1>My desk</h1><p>Focus on your assigned tickets, requested replies, and closure work.</p></div></div>
-    <section class="queue-banner"><div><span class="eyebrow">Your queue</span><h2>Technical Support</h2><p>System access, account, and technical troubleshooting requests.</p></div><div class="queue-count">QUEUE BACKLOG<strong>18</strong></div><div class="queue-count">UNASSIGNED<strong>6</strong></div><div class="queue-count">HIGH PRIORITY<strong>3</strong></div></section>
-    <section class="metric-grid"><article class="metric-card"><span class="eyebrow">My active tickets</span><strong class="metric-value">4</strong><span class="metric-footer"><span class="trend warn">1</span> ticket waiting your reply</span></article><article class="metric-card"><span class="eyebrow">Pending closure</span><strong class="metric-value">2</strong><span class="metric-footer">Ready for your final review</span></article><article class="metric-card resolution-metric"><div class="metric-card-header"><span class="eyebrow">Tickets resolved</span><button class="metric-swap" type="button" data-action="cycle-staff-resolved-period" aria-label="Show the next resolved-ticket period" title="Show today, this week, or this month">↻</button></div><strong class="metric-value">${resolvedPeriod.value}</strong><span class="metric-footer"><span class="period-label">${resolvedPeriod.label}</span>${resolvedPeriod.detail}</span></article><article class="metric-card"><span class="eyebrow">Route corrections</span><strong class="metric-value">2</strong><span class="metric-footer"><span class="period-label">This week</span> Recorded for model review</span></article></section>
+    ${queueBanner}
+    ${deskMetrics}
     ${table}`;
 }
 
@@ -515,7 +551,21 @@ document.addEventListener("click", (event) => {
     render();
     return;
   }
-  if (action === "claim") { showToast("TKT-000128 is now assigned to Arun Patel."); return; }
+  if (action === "toggle-ticket-pool-filters") {
+    state.ticketPoolFiltersOpen = !state.ticketPoolFiltersOpen;
+    render();
+    return;
+  }
+  if (action === "clear-ticket-pool-filters") {
+    state.ticketPoolFilters = { priority: "all", type: "all" };
+    render();
+    return;
+  }
+  if (action === "claim") {
+    const ticketId = event.target.closest("[data-ticket-id]").dataset.ticketId;
+    showToast(`${ticketId} is now assigned to Arun Patel.`);
+    return;
+  }
   if (action === "manual-route") { showToast("Manual routing form would open for TKT-000117."); return; }
   if (action === "open-ticket") { showToast("Ticket detail is the next Django template to implement."); return; }
   if (action === "filter") { showToast("Filters will apply to the ticket queryset in Django."); return; }
@@ -549,6 +599,13 @@ document.addEventListener("input", (event) => {
   const message = passwordRequirementError(event.target.value);
   error.textContent = message;
   error.hidden = !message;
+});
+
+document.addEventListener("change", (event) => {
+  const filterName = event.target.dataset.ticketPoolFilter;
+  if (!filterName) return;
+  state.ticketPoolFilters[filterName] = event.target.value;
+  render();
 });
 
 document.addEventListener("submit", (event) => {
