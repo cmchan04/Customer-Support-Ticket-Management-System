@@ -15,6 +15,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import FeatureUnion, Pipeline
@@ -26,8 +27,14 @@ from xgboost import XGBClassifier
 
 from ticket_ml.config import TrainingConfig
 from ticket_ml.data import DataSplit, PreparedDataset, load_and_prepare, make_train_test_split
-from ticket_ml.evaluation import EvaluationResult, evaluate_pipeline, score_predictions
-from ticket_ml.text import TicketTextPreprocessor, ensure_nltk_resources
+from ticket_ml.evaluation import (
+    EvaluationResult,
+    evaluate_joint_pipeline,
+    evaluate_pipeline,
+    score_predictions,
+)
+from ticket_ml.models import TicketTypeRouterClassifier
+from ticket_ml.text import TicketTextPreprocessor, TicketTypeOneHot, ensure_nltk_resources
 
 
 @dataclass(frozen=True)
@@ -62,35 +69,134 @@ class TrainingRunSummary:
 
 
 @dataclass(frozen=True)
-class WeightedSvmTargetResult:
-    """Selected subject weighting and its independent holdout performance."""
+class TypeSvmTargetResult:
+    """Selected type weight and SVM settings for one prediction target."""
 
     target: str
-    selected_subject_weight: int
-    character_feature_weight: float
+    selected_type_weight: int
+    selected_c: float
+    selected_ngram_range: tuple[int, int]
     selected_cv_macro_f1: float
     selected_cv_accuracy: float
     baseline_holdout_metrics: dict[str, float]
-    weighted_holdout_metrics: dict[str, float]
+    type_holdout_metrics: dict[str, float]
     misclassified_count: int
-    candidate_results: tuple[dict[str, float | int], ...]
+    candidate_results: tuple[dict[str, Any], ...]
 
 
 @dataclass(frozen=True)
-class WeightedSvmExperimentSummary:
-    """Results of the subject-weighted word/character Linear SVM experiment."""
+class TypeSvmExperimentSummary:
+    """Results of the customer-selected ticket-type SVM experiment."""
 
     artifact_dir: Path
     report_dir: Path
-    queue: WeightedSvmTargetResult
-    priority: WeightedSvmTargetResult
+    queue: TypeSvmTargetResult
+    priority: TypeSvmTargetResult
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "artifact_dir": str(self.artifact_dir),
             "report_dir": str(self.report_dir),
-            "queue": _weighted_svm_result_as_dict(self.queue),
-            "priority": _weighted_svm_result_as_dict(self.priority),
+            "queue": _type_svm_result_as_dict(self.queue),
+            "priority": _type_svm_result_as_dict(self.priority),
+        }
+
+
+@dataclass(frozen=True)
+class TypeOneHotTargetResult:
+    target: str
+    selected_type_feature_weight: float
+    selected_c: float
+    selected_cv_macro_f1: float
+    selected_cv_accuracy: float
+    baseline_holdout_metrics: dict[str, float]
+    onehot_holdout_metrics: dict[str, float]
+    misclassified_count: int
+    candidate_results: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class TypeOneHotExperimentSummary:
+    artifact_dir: Path
+    report_dir: Path
+    queue: TypeOneHotTargetResult
+    priority: TypeOneHotTargetResult
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "artifact_dir": str(self.artifact_dir),
+            "report_dir": str(self.report_dir),
+            "queue": _type_onehot_result_as_dict(self.queue),
+            "priority": _type_onehot_result_as_dict(self.priority),
+        }
+
+
+@dataclass(frozen=True)
+class TypeRouterTargetResult:
+    """Holdout result for the per-ticket-type routed classifier."""
+
+    target: str
+    selected_type_weight: int
+    selected_c: float
+    selected_ngram_range: tuple[int, int]
+    selected_class_weight_power: float
+    calibration_enabled: bool
+    calibration_bias: tuple[float, ...] | None
+    selected_cv_macro_f1: float
+    selected_cv_accuracy: float
+    holdout_metrics: dict[str, float]
+    misclassified_count: int
+    candidate_results: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class TypeRouterExperimentSummary:
+    """Independent results and artifacts for routed type-specific models."""
+
+    artifact_dir: Path
+    report_dir: Path
+    queue: TypeRouterTargetResult
+    priority: TypeRouterTargetResult
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "artifact_dir": str(self.artifact_dir),
+            "report_dir": str(self.report_dir),
+            "queue": _type_router_result_as_dict(self.queue),
+            "priority": _type_router_result_as_dict(self.priority),
+        }
+
+
+@dataclass(frozen=True)
+class JointTypeExperimentSummary:
+    """Results for the optional joint queue/priority type-router experiment."""
+
+    artifact_dir: Path
+    report_dir: Path
+    selected_params: dict[str, Any]
+    selected_cv_macro_f1: float
+    selected_cv_accuracy: float
+    holdout_queue_metrics: dict[str, float]
+    holdout_priority_metrics: dict[str, float]
+    queue_misclassified_count: int
+    priority_misclassified_count: int
+    joint_accuracy: float
+    candidate_results: tuple[dict[str, Any], ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "artifact_dir": str(self.artifact_dir),
+            "report_dir": str(self.report_dir),
+            "selected_model": "linear_svm_joint_by_type",
+            "selected_params": self.selected_params,
+            "selected_cv_macro_f1": self.selected_cv_macro_f1,
+            "selected_cv_accuracy": self.selected_cv_accuracy,
+            "holdout_queue_metrics": self.holdout_queue_metrics,
+            "holdout_priority_metrics": self.holdout_priority_metrics,
+            "queue_misclassified_count": self.queue_misclassified_count,
+            "priority_misclassified_count": self.priority_misclassified_count,
+            "joint_accuracy": self.joint_accuracy,
+            "candidate_results": list(self.candidate_results),
         }
 
 
@@ -165,15 +271,44 @@ def _target_result_as_dict(result: TargetTrainingResult) -> dict[str, Any]:
     }
 
 
-def _weighted_svm_result_as_dict(result: WeightedSvmTargetResult) -> dict[str, Any]:
+def _type_svm_result_as_dict(result: TypeSvmTargetResult) -> dict[str, Any]:
     return {
-        "selected_subject_weight": result.selected_subject_weight,
-        "body_weight": 1,
-        "character_feature_weight": result.character_feature_weight,
+        "selected_type_weight": result.selected_type_weight,
+        "selected_c": result.selected_c,
+        "selected_ngram_range": result.selected_ngram_range,
         "selected_cv_macro_f1": result.selected_cv_macro_f1,
         "selected_cv_accuracy": result.selected_cv_accuracy,
         "baseline_holdout_metrics": result.baseline_holdout_metrics,
-        "weighted_holdout_metrics": result.weighted_holdout_metrics,
+        "type_holdout_metrics": result.type_holdout_metrics,
+        "misclassified_count": result.misclassified_count,
+        "candidate_results": list(result.candidate_results),
+    }
+
+
+def _type_onehot_result_as_dict(result: TypeOneHotTargetResult) -> dict[str, Any]:
+    return {
+        "selected_type_feature_weight": result.selected_type_feature_weight,
+        "selected_c": result.selected_c,
+        "selected_cv_macro_f1": result.selected_cv_macro_f1,
+        "selected_cv_accuracy": result.selected_cv_accuracy,
+        "baseline_holdout_metrics": result.baseline_holdout_metrics,
+        "onehot_holdout_metrics": result.onehot_holdout_metrics,
+        "misclassified_count": result.misclassified_count,
+        "candidate_results": list(result.candidate_results),
+    }
+
+
+def _type_router_result_as_dict(result: TypeRouterTargetResult) -> dict[str, Any]:
+    return {
+        "selected_type_weight": result.selected_type_weight,
+        "selected_c": result.selected_c,
+        "selected_ngram_range": result.selected_ngram_range,
+        "selected_class_weight_power": result.selected_class_weight_power,
+        "calibration_enabled": result.calibration_enabled,
+        "calibration_bias": result.calibration_bias,
+        "selected_cv_macro_f1": result.selected_cv_macro_f1,
+        "selected_cv_accuracy": result.selected_cv_accuracy,
+        "holdout_metrics": result.holdout_metrics,
         "misclassified_count": result.misclassified_count,
         "candidate_results": list(result.candidate_results),
     }
@@ -195,13 +330,28 @@ def _write_json(path: Path, content: dict[str, Any]) -> None:
     path.write_text(json.dumps(_json_safe(content), indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _pipeline(classifier: Any, cache_dir: Path) -> Pipeline:
+def _pipeline(
+    classifier: Any,
+    cache_dir: Path,
+    *,
+    subject_weight: int = 1,
+    type_weight: int = 0,
+    max_features: int = 150_000,
+) -> Pipeline:
     return Pipeline(
         [
-            ("text", TicketTextPreprocessor()),
+            (
+                "text",
+                TicketTextPreprocessor(
+                    subject_weight=subject_weight,
+                    type_weight=type_weight,
+                ),
+            ),
             (
                 "tfidf",
-                TfidfVectorizer(strip_accents="unicode", sublinear_tf=True, max_features=150_000),
+                TfidfVectorizer(
+                    strip_accents="unicode", sublinear_tf=True, max_features=max_features
+                ),
             ),
             ("classifier", classifier),
         ],
@@ -243,6 +393,30 @@ def _candidate_specs(
             feature_grid | {"classifier__C": list(config.svm_c)},
         ),
         (
+            "linear_svm_with_type",
+            _pipeline(
+                LinearSVC(class_weight="balanced", random_state=config.random_seed),
+                target_cache / "linear_svm_with_type",
+            ),
+            feature_grid
+            | {
+                "text__type_weight": list(config.type_svm_weights),
+                "classifier__C": list(config.svm_c),
+            },
+        ),
+        (
+            "linear_svm_by_type",
+            _type_router_pipeline(config, target_cache / "linear_svm_by_type"),
+            {
+                "base_estimator__text__type_weight": list(config.type_router_weights),
+                "base_estimator__tfidf__ngram_range": list(config.type_router_ngram_ranges),
+                "base_estimator__tfidf__min_df": [1],
+                "base_estimator__tfidf__max_df": [1.0],
+                "base_estimator__classifier__C": list(config.type_router_c),
+                "class_weight_power": list(config.type_router_class_weight_powers),
+            },
+        ),
+        (
             "decision_tree",
             _pipeline(
                 DecisionTreeClassifier(
@@ -271,9 +445,449 @@ def _candidate_specs(
     ]
 
 
-def _weighted_word_character_svm_pipeline(config: TrainingConfig, cache_dir: Path) -> Pipeline:
-    """Build a Linear SVM with complementary word and character TF-IDF features."""
-    word_features = Pipeline(
+def _train_type_svm_target(
+    target: str,
+    target_train: Any,
+    target_test: Any,
+    dataset: PreparedDataset,
+    split: DataSplit,
+    config: TrainingConfig,
+    artifact_dir: Path,
+    report_dir: Path,
+) -> TypeSvmTargetResult:
+    cross_validation = StratifiedKFold(
+        n_splits=config.cv_folds, shuffle=True, random_state=config.random_seed
+    )
+    baseline = _pipeline(
+        LinearSVC(C=10.0, class_weight="balanced", random_state=config.random_seed),
+        config.cache_dir / "type_experiment" / target / "baseline",
+    )
+    baseline.set_params(
+        tfidf__ngram_range=(1, 3),
+        tfidf__min_df=1,
+        tfidf__max_df=1.0,
+    )
+    baseline.fit(split.x_train, target_train)
+    baseline_metrics = score_predictions(target_test, baseline.predict(split.x_test))
+
+    search = GridSearchCV(
+        estimator=_pipeline(
+            LinearSVC(class_weight="balanced", random_state=config.random_seed),
+            config.cache_dir / "type_experiment" / target / "type_svm",
+        ),
+        param_grid={
+            "text__type_weight": list(config.type_svm_weights),
+            "tfidf__ngram_range": list(config.type_svm_ngram_ranges),
+            "tfidf__min_df": [1],
+            "tfidf__max_df": [1.0],
+            "classifier__C": list(config.type_svm_c),
+        },
+        scoring={"macro_f1": "f1_macro", "accuracy": "accuracy"},
+        cv=cross_validation,
+        n_jobs=config.n_jobs,
+        refit="macro_f1",
+        return_train_score=False,
+    )
+    search.fit(split.x_train, target_train)
+
+    candidate_results: list[dict[str, Any]] = []
+    for index, params in enumerate(search.cv_results_["params"]):
+        candidate_results.append(
+            {
+                "type_weight": int(params["text__type_weight"]),
+                "c": float(params["classifier__C"]),
+                "ngram_range": params["tfidf__ngram_range"],
+                "cv_macro_f1": float(search.cv_results_["mean_test_macro_f1"][index]),
+                "cv_accuracy": float(search.cv_results_["mean_test_accuracy"][index]),
+            }
+        )
+
+    evaluation = evaluate_pipeline(
+        search.best_estimator_, split.x_test, target_test, target, report_dir
+    )
+    final_pipeline = clone(search.best_estimator_)
+    final_target = dataset.queue if target == "queue" else dataset.priority
+    final_pipeline.fit(dataset.features, final_target)
+    joblib.dump(
+        final_pipeline,
+        artifact_dir / f"{target}_pipeline.joblib",
+        compress=3,
+    )
+    best_params = search.best_params_
+    return TypeSvmTargetResult(
+        target=target,
+        selected_type_weight=int(best_params["text__type_weight"]),
+        selected_c=float(best_params["classifier__C"]),
+        selected_ngram_range=tuple(best_params["tfidf__ngram_range"]),
+        selected_cv_macro_f1=float(search.best_score_),
+        selected_cv_accuracy=float(search.cv_results_["mean_test_accuracy"][search.best_index_]),
+        baseline_holdout_metrics=baseline_metrics,
+        type_holdout_metrics=evaluation.metrics,
+        misclassified_count=evaluation.misclassified_count,
+        candidate_results=tuple(candidate_results),
+    )
+
+
+def tune_type_svm(config: TrainingConfig) -> TypeSvmExperimentSummary:
+    """Tune customer-selected ticket type without replacing standard artifacts."""
+    ensure_nltk_resources()
+    experiment_artifact_dir = config.artifact_dir / "experiments" / "type_svm"
+    experiment_report_dir = config.report_dir / "type_experiment"
+    experiment_artifact_dir.mkdir(parents=True, exist_ok=True)
+    experiment_report_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = load_and_prepare(config)
+    split = make_train_test_split(dataset, config)
+    queue = _train_type_svm_target(
+        "queue",
+        split.queue_train,
+        split.queue_test,
+        dataset,
+        split,
+        config,
+        experiment_artifact_dir,
+        experiment_report_dir,
+    )
+    priority = _train_type_svm_target(
+        "priority",
+        split.priority_train,
+        split.priority_test,
+        dataset,
+        split,
+        config,
+        experiment_artifact_dir,
+        experiment_report_dir,
+    )
+    summary = TypeSvmExperimentSummary(
+        artifact_dir=experiment_artifact_dir,
+        report_dir=experiment_report_dir,
+        queue=queue,
+        priority=priority,
+    )
+    _write_json(experiment_report_dir / "metrics.json", summary.as_dict())
+    return summary
+
+
+def _type_router_pipeline(config: TrainingConfig, cache_dir: Path) -> TicketTypeRouterClassifier:
+    base_pipeline = _pipeline(
+        LinearSVC(
+            class_weight="balanced",
+            max_iter=5_000,
+            random_state=config.random_seed,
+        ),
+        cache_dir / "base",
+        max_features=config.type_router_max_features,
+    )
+    return TicketTypeRouterClassifier(base_estimator=base_pipeline)
+
+
+def _joint_labels(queue: Any, priority: Any) -> np.ndarray:
+    """Encode the two business outputs as one reversible training label."""
+    return np.asarray(queue).astype(str) + "||" + np.asarray(priority).astype(str)
+
+
+def _split_joint_label_array(labels: Any) -> tuple[np.ndarray, np.ndarray]:
+    queues: list[str] = []
+    priorities: list[str] = []
+    for value in np.asarray(labels):
+        text = str(value)
+        if "||" not in text:
+            raise ValueError("Joint labels must use the 'queue||priority' format.")
+        queue, priority = text.split("||", 1)
+        queues.append(queue)
+        priorities.append(priority)
+    return np.asarray(queues), np.asarray(priorities)
+
+
+def _joint_macro_f1_scorer(estimator: Any, features: Any, labels: Any) -> float:
+    """Select joint candidates by the average queue and priority macro F1."""
+    predicted_queue, predicted_priority = _split_joint_label_array(estimator.predict(features))
+    actual_queue, actual_priority = _split_joint_label_array(labels)
+    return float(
+        (
+            f1_score(actual_queue, predicted_queue, average="macro", zero_division=0)
+            + f1_score(actual_priority, predicted_priority, average="macro", zero_division=0)
+        )
+        / 2.0
+    )
+
+
+def _joint_accuracy_scorer(estimator: Any, features: Any, labels: Any) -> float:
+    """Return exact joint-label accuracy for candidate comparison."""
+    predictions = np.asarray(estimator.predict(features)).astype(str)
+    return float(np.mean(predictions == np.asarray(labels).astype(str)))
+
+
+def _joint_type_router_pipeline(config: TrainingConfig, cache_dir: Path) -> TicketTypeRouterClassifier:
+    """Build the type-routed Linear SVM used for the joint label experiment."""
+    base_pipeline = _pipeline(
+        LinearSVC(
+            class_weight="balanced",
+            max_iter=5_000,
+            random_state=config.random_seed,
+        ),
+        cache_dir / "base",
+        max_features=config.joint_max_features,
+    )
+    return TicketTypeRouterClassifier(
+        base_estimator=base_pipeline,
+        decision_mode="marginal",
+        score_temperature=config.joint_score_temperatures[0],
+    )
+
+
+def _train_type_router_target(
+    target: str,
+    target_train: Any,
+    target_test: Any,
+    dataset: PreparedDataset,
+    split: DataSplit,
+    config: TrainingConfig,
+    artifact_dir: Path,
+    report_dir: Path,
+) -> TypeRouterTargetResult:
+    cross_validation = StratifiedKFold(
+        n_splits=config.cv_folds, shuffle=True, random_state=config.random_seed
+    )
+    search = GridSearchCV(
+        estimator=_type_router_pipeline(
+            config, config.cache_dir / "type_router_experiment" / target
+        ),
+        param_grid={
+            "base_estimator__text__type_weight": list(config.type_router_weights),
+            "base_estimator__tfidf__ngram_range": list(config.type_router_ngram_ranges),
+            "base_estimator__tfidf__min_df": [1],
+            "base_estimator__tfidf__max_df": [1.0],
+            "base_estimator__classifier__C": list(config.type_router_c),
+            "class_weight_power": list(config.type_router_class_weight_powers),
+        },
+        scoring={"macro_f1": "f1_macro", "accuracy": "accuracy"},
+        cv=cross_validation,
+        n_jobs=config.n_jobs,
+        refit="macro_f1",
+        return_train_score=False,
+    )
+    search.fit(split.x_train, target_train)
+
+    candidate_results: list[dict[str, Any]] = []
+    for index, params in enumerate(search.cv_results_["params"]):
+        candidate_results.append(
+            {
+                "type_weight": int(params["base_estimator__text__type_weight"]),
+                "c": float(params["base_estimator__classifier__C"]),
+                "ngram_range": params["base_estimator__tfidf__ngram_range"],
+                "class_weight_power": float(params["class_weight_power"]),
+                "cv_macro_f1": float(search.cv_results_["mean_test_macro_f1"][index]),
+                "cv_accuracy": float(search.cv_results_["mean_test_accuracy"][index]),
+            }
+        )
+
+    calibration_enabled = target == "queue" and config.type_router_calibrate_queue
+    calibration_bias: tuple[float, ...] | None = None
+    if calibration_enabled:
+        calibration_bias = tuple(
+            float(value)
+            for value in search.best_estimator_.fit_decision_bias(
+                split.x_train,
+                target_train,
+                cv_folds=config.type_router_calibration_cv_folds,
+                grid=config.type_router_calibration_grid,
+                passes=config.type_router_calibration_passes,
+                random_state=config.random_seed,
+            )
+        )
+
+    evaluation = evaluate_pipeline(
+        search.best_estimator_, split.x_test, target_test, target, report_dir
+    )
+    final_pipeline = clone(search.best_estimator_)
+    final_target = dataset.queue if target == "queue" else dataset.priority
+    final_pipeline.fit(dataset.features, final_target)
+    if calibration_enabled:
+        final_pipeline.fit_decision_bias(
+            dataset.features,
+            final_target,
+            cv_folds=config.type_router_calibration_cv_folds,
+            grid=config.type_router_calibration_grid,
+            passes=config.type_router_calibration_passes,
+            random_state=config.random_seed,
+        )
+    joblib.dump(final_pipeline, artifact_dir / f"{target}_pipeline.joblib", compress=3)
+    best_params = search.best_params_
+    return TypeRouterTargetResult(
+        target=target,
+        selected_type_weight=int(best_params["base_estimator__text__type_weight"]),
+        selected_c=float(best_params["base_estimator__classifier__C"]),
+        selected_ngram_range=tuple(best_params["base_estimator__tfidf__ngram_range"]),
+        selected_class_weight_power=float(best_params["class_weight_power"]),
+        calibration_enabled=calibration_enabled,
+        calibration_bias=calibration_bias,
+        selected_cv_macro_f1=float(search.best_score_),
+        selected_cv_accuracy=float(search.cv_results_["mean_test_accuracy"][search.best_index_]),
+        holdout_metrics=evaluation.metrics,
+        misclassified_count=evaluation.misclassified_count,
+        candidate_results=tuple(candidate_results),
+    )
+
+
+def tune_type_router(config: TrainingConfig) -> TypeRouterExperimentSummary:
+    """Tune and persist the routed per-ticket-type Linear SVM experiment."""
+    ensure_nltk_resources()
+    experiment_artifact_dir = config.artifact_dir / "experiments" / "type_router"
+    experiment_report_dir = config.report_dir / "type_router_experiment"
+    experiment_artifact_dir.mkdir(parents=True, exist_ok=True)
+    experiment_report_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = load_and_prepare(config)
+    split = make_train_test_split(dataset, config)
+    queue = _train_type_router_target(
+        "queue",
+        split.queue_train,
+        split.queue_test,
+        dataset,
+        split,
+        config,
+        experiment_artifact_dir,
+        experiment_report_dir,
+    )
+    priority = _train_type_router_target(
+        "priority",
+        split.priority_train,
+        split.priority_test,
+        dataset,
+        split,
+        config,
+        experiment_artifact_dir,
+        experiment_report_dir,
+    )
+    summary = TypeRouterExperimentSummary(
+        artifact_dir=experiment_artifact_dir,
+        report_dir=experiment_report_dir,
+        queue=queue,
+        priority=priority,
+    )
+    _write_json(experiment_report_dir / "metrics.json", summary.as_dict())
+    return summary
+
+
+def tune_joint_type(config: TrainingConfig) -> JointTypeExperimentSummary:
+    """Train and persist the deployable joint queue/priority classifier.
+
+    The experiment predicts a reversible ``queue||priority`` label.  This lets
+    the model use correlations between the two business outputs while keeping
+    the customer-selected type as the only additional input.  Selection uses
+    only five-fold CV on the training portion; the holdout is evaluated once
+    after the best parameter set has been selected.
+    """
+    ensure_nltk_resources()
+    # Unlike exploratory variants, the selected joint pipeline is a deployable
+    # model. Keep it separate from experiments and from the two-pipeline model.
+    experiment_artifact_dir = config.artifact_dir / "joint"
+    experiment_report_dir = config.report_dir / "joint_type_experiment"
+    experiment_artifact_dir.mkdir(parents=True, exist_ok=True)
+    experiment_report_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = load_and_prepare(config)
+    split = make_train_test_split(dataset, config)
+    train_labels = _joint_labels(split.queue_train, split.priority_train)
+    cross_validation = StratifiedKFold(
+        n_splits=config.cv_folds, shuffle=True, random_state=config.random_seed
+    )
+    search = GridSearchCV(
+        estimator=_joint_type_router_pipeline(
+            config, config.cache_dir / "joint_type_experiment"
+        ),
+        param_grid={
+            "base_estimator__text__type_weight": list(config.joint_type_weights),
+            "base_estimator__tfidf__ngram_range": list(config.joint_ngram_ranges),
+            "base_estimator__tfidf__min_df": [1],
+            "base_estimator__tfidf__max_df": [1.0],
+            "base_estimator__classifier__C": list(config.joint_c),
+            "class_weight_power": list(config.joint_class_weight_powers),
+            "score_temperature": list(config.joint_score_temperatures),
+        },
+        scoring={"macro_f1": _joint_macro_f1_scorer, "accuracy": _joint_accuracy_scorer},
+        cv=cross_validation,
+        n_jobs=config.n_jobs,
+        refit="macro_f1",
+        return_train_score=False,
+    )
+    search.fit(split.x_train, train_labels)
+
+    candidate_results: list[dict[str, Any]] = []
+    for index, params in enumerate(search.cv_results_["params"]):
+        # GridSearchCV does not retain every fitted estimator.  The selected
+        # candidate is evaluated below; CV scores are still recorded for all
+        # parameter combinations, which is the leakage-safe selection signal.
+        candidate_results.append(
+            {
+                "type_weight": int(params["base_estimator__text__type_weight"]),
+                "c": float(params["base_estimator__classifier__C"]),
+                "ngram_range": params["base_estimator__tfidf__ngram_range"],
+                "class_weight_power": float(params["class_weight_power"]),
+                "score_temperature": float(params["score_temperature"]),
+                "cv_macro_f1": float(search.cv_results_["mean_test_macro_f1"][index]),
+                "cv_accuracy": float(search.cv_results_["mean_test_accuracy"][index]),
+            }
+        )
+
+    selected_evaluation = evaluate_joint_pipeline(
+        search.best_estimator_,
+        split.x_test,
+        split.queue_test,
+        split.priority_test,
+        experiment_report_dir,
+    )
+    final_pipeline = clone(search.best_estimator_)
+    final_pipeline.fit(dataset.features, _joint_labels(dataset.queue, dataset.priority))
+    joblib.dump(final_pipeline, experiment_artifact_dir / "joint_pipeline.joblib", compress=3)
+
+    summary = JointTypeExperimentSummary(
+        artifact_dir=experiment_artifact_dir,
+        report_dir=experiment_report_dir,
+        selected_params=_json_safe(search.best_params_),
+        selected_cv_macro_f1=float(search.best_score_),
+        selected_cv_accuracy=float(
+            search.cv_results_["mean_test_accuracy"][search.best_index_]
+        ),
+        holdout_queue_metrics=selected_evaluation.queue.metrics,
+        holdout_priority_metrics=selected_evaluation.priority.metrics,
+        queue_misclassified_count=selected_evaluation.queue.misclassified_count,
+        priority_misclassified_count=selected_evaluation.priority.misclassified_count,
+        joint_accuracy=selected_evaluation.joint_accuracy,
+        candidate_results=tuple(candidate_results),
+    )
+    _write_json(experiment_report_dir / "metrics.json", summary.as_dict())
+    _write_json(
+        experiment_artifact_dir / "metadata.json",
+        {
+            "trained_at_utc": datetime.now(UTC).isoformat(),
+            "dataset": {
+                "path": str(config.dataset_path),
+                "sha256": dataset.source_sha256,
+                **dataset.summary,
+            },
+            "labels": {
+                "queue": sorted(str(label) for label in dataset.queue.unique()),
+                "priority": sorted(str(label) for label in dataset.priority.unique()),
+                "joint": sorted(str(label) for label in np.unique(train_labels)),
+            },
+            "split": {
+                "random_seed": config.random_seed,
+                "test_size": config.test_size,
+                "train_rows": len(split.x_train),
+                "test_rows": len(split.x_test),
+            },
+            "config": config.as_metadata(),
+            "library_versions": _versions(),
+            "results": summary.as_dict(),
+        },
+    )
+    return summary
+
+
+def _type_onehot_pipeline(config: TrainingConfig, cache_dir: Path) -> Pipeline:
+    text_branch = Pipeline(
         [
             ("text", TicketTextPreprocessor()),
             (
@@ -289,39 +903,21 @@ def _weighted_word_character_svm_pipeline(config: TrainingConfig, cache_dir: Pat
             ),
         ]
     )
-    character_features = Pipeline(
-        [
-            ("text", TicketTextPreprocessor()),
-            (
-                "tfidf",
-                TfidfVectorizer(
-                    analyzer="char_wb",
-                    strip_accents="unicode",
-                    sublinear_tf=True,
-                    max_features=config.weighted_svm_character_max_features,
-                    ngram_range=config.weighted_svm_character_ngram_range,
-                    min_df=config.weighted_svm_character_min_df,
-                ),
-            ),
-        ]
-    )
+    type_branch = Pipeline([("onehot", TicketTypeOneHot())])
     return Pipeline(
         [
             (
                 "features",
                 FeatureUnion(
-                    [("word", word_features), ("character", character_features)],
-                    transformer_weights={
-                        "word": 1.0,
-                        "character": config.weighted_svm_character_weight,
-                    },
+                    [("text", text_branch), ("type", type_branch)],
+                    transformer_weights={"text": 1.0, "type": 1.0},
                 ),
             ),
             (
                 "classifier",
                 LinearSVC(
-                    C=config.weighted_svm_c,
                     class_weight="balanced",
+                    max_iter=5_000,
                     random_state=config.random_seed,
                 ),
             ),
@@ -330,18 +926,7 @@ def _weighted_word_character_svm_pipeline(config: TrainingConfig, cache_dir: Pat
     )
 
 
-def _weighted_svm_parameter_grid(config: TrainingConfig) -> list[dict[str, list[int]]]:
-    """Keep both TF-IDF branches at the same subject-to-body ratio."""
-    return [
-        {
-            "features__word__text__subject_weight": [subject_weight],
-            "features__character__text__subject_weight": [subject_weight],
-        }
-        for subject_weight in config.weighted_svm_subject_weights
-    ]
-
-
-def _train_weighted_svm_target(
+def _train_type_onehot_target(
     target: str,
     target_train: Any,
     target_test: Any,
@@ -350,17 +935,13 @@ def _train_weighted_svm_target(
     config: TrainingConfig,
     artifact_dir: Path,
     report_dir: Path,
-) -> WeightedSvmTargetResult:
+) -> TypeOneHotTargetResult:
     cross_validation = StratifiedKFold(
         n_splits=config.cv_folds, shuffle=True, random_state=config.random_seed
     )
     baseline = _pipeline(
-        LinearSVC(
-            C=config.weighted_svm_c,
-            class_weight="balanced",
-            random_state=config.random_seed,
-        ),
-        config.cache_dir / "weighting_experiment" / target / "baseline",
+        LinearSVC(C=10.0, class_weight="balanced", random_state=config.random_seed),
+        config.cache_dir / "type_onehot_experiment" / target / "baseline",
     )
     baseline.set_params(
         tfidf__ngram_range=(1, 3),
@@ -371,10 +952,16 @@ def _train_weighted_svm_target(
     baseline_metrics = score_predictions(target_test, baseline.predict(split.x_test))
 
     search = GridSearchCV(
-        estimator=_weighted_word_character_svm_pipeline(
-            config, config.cache_dir / "weighting_experiment" / target / "weighted"
+        estimator=_type_onehot_pipeline(
+            config, config.cache_dir / "type_onehot_experiment" / target
         ),
-        param_grid=_weighted_svm_parameter_grid(config),
+        param_grid={
+            "features__transformer_weights": [
+                {"text": 1.0, "type": weight}
+                for weight in config.type_onehot_weights
+            ],
+            "classifier__C": list(config.type_svm_c),
+        },
         scoring={"macro_f1": "f1_macro", "accuracy": "accuracy"},
         cv=cross_validation,
         n_jobs=config.n_jobs,
@@ -383,13 +970,14 @@ def _train_weighted_svm_target(
     )
     search.fit(split.x_train, target_train)
 
-    candidate_results: list[dict[str, float | int]] = []
-    for index, subject_weight in enumerate(config.weighted_svm_subject_weights):
+    candidate_results: list[dict[str, Any]] = []
+    for index, params in enumerate(search.cv_results_["params"]):
         candidate_results.append(
             {
-                "subject_weight": subject_weight,
-                "body_weight": 1,
-                "character_feature_weight": config.weighted_svm_character_weight,
+                "type_feature_weight": float(
+                    params["features__transformer_weights"]["type"]
+                ),
+                "c": float(params["classifier__C"]),
                 "cv_macro_f1": float(search.cv_results_["mean_test_macro_f1"][index]),
                 "cv_accuracy": float(search.cv_results_["mean_test_accuracy"][index]),
             }
@@ -401,37 +989,36 @@ def _train_weighted_svm_target(
     final_pipeline = clone(search.best_estimator_)
     final_target = dataset.queue if target == "queue" else dataset.priority
     final_pipeline.fit(dataset.features, final_target)
-    joblib.dump(
-        final_pipeline,
-        artifact_dir / f"{target}_weighted_word_character_svm_pipeline.joblib",
-        compress=3,
-    )
-    best_index = search.best_index_
-    best_weight = config.weighted_svm_subject_weights[best_index]
-    return WeightedSvmTargetResult(
+    joblib.dump(final_pipeline, artifact_dir / f"{target}_pipeline.joblib", compress=3)
+    best_params = search.best_params_
+    return TypeOneHotTargetResult(
         target=target,
-        selected_subject_weight=best_weight,
-        character_feature_weight=config.weighted_svm_character_weight,
+        selected_type_feature_weight=float(
+            best_params["features__transformer_weights"]["type"]
+        ),
+        selected_c=float(best_params["classifier__C"]),
         selected_cv_macro_f1=float(search.best_score_),
-        selected_cv_accuracy=float(search.cv_results_["mean_test_accuracy"][best_index]),
+        selected_cv_accuracy=float(
+            search.cv_results_["mean_test_accuracy"][search.best_index_]
+        ),
         baseline_holdout_metrics=baseline_metrics,
-        weighted_holdout_metrics=evaluation.metrics,
+        onehot_holdout_metrics=evaluation.metrics,
         misclassified_count=evaluation.misclassified_count,
         candidate_results=tuple(candidate_results),
     )
 
 
-def tune_weighted_svm(config: TrainingConfig) -> WeightedSvmExperimentSummary:
-    """Tune subject emphasis without modifying the standard saved production models."""
+def tune_type_onehot(config: TrainingConfig) -> TypeOneHotExperimentSummary:
+    """Tune an explicit one-hot type feature with a separate feature weight."""
     ensure_nltk_resources()
-    experiment_artifact_dir = config.artifact_dir / "experiments" / "weighted_svm"
-    experiment_report_dir = config.report_dir / "weighting_experiment"
+    experiment_artifact_dir = config.artifact_dir / "experiments" / "type_onehot"
+    experiment_report_dir = config.report_dir / "type_onehot_experiment"
     experiment_artifact_dir.mkdir(parents=True, exist_ok=True)
     experiment_report_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = load_and_prepare(config)
     split = make_train_test_split(dataset, config)
-    queue = _train_weighted_svm_target(
+    queue = _train_type_onehot_target(
         "queue",
         split.queue_train,
         split.queue_test,
@@ -441,7 +1028,7 @@ def tune_weighted_svm(config: TrainingConfig) -> WeightedSvmExperimentSummary:
         experiment_artifact_dir,
         experiment_report_dir,
     )
-    priority = _train_weighted_svm_target(
+    priority = _train_type_onehot_target(
         "priority",
         split.priority_train,
         split.priority_test,
@@ -451,7 +1038,7 @@ def tune_weighted_svm(config: TrainingConfig) -> WeightedSvmExperimentSummary:
         experiment_artifact_dir,
         experiment_report_dir,
     )
-    summary = WeightedSvmExperimentSummary(
+    summary = TypeOneHotExperimentSummary(
         artifact_dir=experiment_artifact_dir,
         report_dir=experiment_report_dir,
         queue=queue,
@@ -523,12 +1110,35 @@ def _train_target(
         )
 
     selected_name, selected_search = max(searches, key=lambda entry: entry[1].best_score_)
+    calibration_enabled = (
+        selected_name == "linear_svm_by_type"
+        and target == "queue"
+        and config.type_router_calibrate_queue
+    )
+    if calibration_enabled:
+        selected_search.best_estimator_.fit_decision_bias(
+            split.x_train,
+            target_train,
+            cv_folds=config.type_router_calibration_cv_folds,
+            grid=config.type_router_calibration_grid,
+            passes=config.type_router_calibration_passes,
+            random_state=config.random_seed,
+        )
     evaluation: EvaluationResult = evaluate_pipeline(
         selected_search.best_estimator_, split.x_test, target_test, target, config.report_dir
     )
     final_pipeline = clone(selected_search.best_estimator_)
     final_target = dataset.queue if target == "queue" else dataset.priority
     final_pipeline.fit(dataset.features, final_target)
+    if calibration_enabled:
+        final_pipeline.fit_decision_bias(
+            dataset.features,
+            final_target,
+            cv_folds=config.type_router_calibration_cv_folds,
+            grid=config.type_router_calibration_grid,
+            passes=config.type_router_calibration_passes,
+            random_state=config.random_seed,
+        )
     joblib.dump(final_pipeline, config.artifact_dir / f"{target}_pipeline.joblib", compress=3)
     return TargetTrainingResult(
         target=target,

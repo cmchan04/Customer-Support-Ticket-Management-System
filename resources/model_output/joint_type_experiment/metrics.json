@@ -1,0 +1,139 @@
+{
+  "artifact_dir": "E:\\APU\\FYP_TP068983\\artifacts\\models\\joint",
+  "candidate_results": [
+    {
+      "c": 10.0,
+      "class_weight_power": 1.0,
+      "cv_accuracy": 0.6674827850038256,
+      "cv_macro_f1": 0.7545617514191324,
+      "ngram_range": [
+        1,
+        3
+      ],
+      "score_temperature": 0.1,
+      "type_weight": 3
+    },
+    {
+      "c": 10.0,
+      "class_weight_power": 1.0,
+      "cv_accuracy": 0.6651109410864575,
+      "cv_macro_f1": 0.7552738216331248,
+      "ngram_range": [
+        1,
+        3
+      ],
+      "score_temperature": 0.25,
+      "type_weight": 3
+    },
+    {
+      "c": 10.0,
+      "class_weight_power": 1.25,
+      "cv_accuracy": 0.6669472073450651,
+      "cv_macro_f1": 0.7541905497455987,
+      "ngram_range": [
+        1,
+        3
+      ],
+      "score_temperature": 0.1,
+      "type_weight": 3
+    },
+    {
+      "c": 10.0,
+      "class_weight_power": 1.25,
+      "cv_accuracy": 0.6642693190512624,
+      "cv_macro_f1": 0.7550673156994903,
+      "ngram_range": [
+        1,
+        3
+      ],
+      "score_temperature": 0.25,
+      "type_weight": 3
+    },
+    {
+      "c": 10.0,
+      "class_weight_power": 1.0,
+      "cv_accuracy": 0.6703902065799541,
+      "cv_macro_f1": 0.753957981715154,
+      "ngram_range": [
+        1,
+        4
+      ],
+      "score_temperature": 0.1,
+      "type_weight": 3
+    },
+    {
+      "c": 10.0,
+      "class_weight_power": 1.0,
+      "cv_accuracy": 0.6670237184391736,
+      "cv_macro_f1": 0.7564561968740133,
+      "ngram_range": [
+        1,
+        4
+      ],
+      "score_temperature": 0.25,
+      "type_weight": 3
+    },
+    {
+      "c": 10.0,
+      "class_weight_power": 1.25,
+      "cv_accuracy": 0.6690895179801072,
+      "cv_macro_f1": 0.7533153463144281,
+      "ngram_range": [
+        1,
+        4
+      ],
+      "score_temperature": 0.1,
+      "type_weight": 3
+    },
+    {
+      "c": 10.0,
+      "class_weight_power": 1.25,
+      "cv_accuracy": 0.6652639632746749,
+      "cv_macro_f1": 0.7551745306675823,
+      "ngram_range": [
+        1,
+        4
+      ],
+      "score_temperature": 0.25,
+      "type_weight": 3
+    }
+  ],
+  "holdout_priority_metrics": {
+    "accuracy": 0.8026315789473685,
+    "high_priority_recall": 0.8393700787401575,
+    "macro_f1": 0.7995019674030784,
+    "macro_precision": 0.8075711620276399,
+    "macro_recall": 0.7933356373135684,
+    "weighted_f1": 0.8022820384457708,
+    "weighted_precision": 0.8032735121890118,
+    "weighted_recall": 0.8026315789473685
+  },
+  "holdout_queue_metrics": {
+    "accuracy": 0.7805997552019583,
+    "macro_f1": 0.7949445195895043,
+    "macro_precision": 0.8522191187649296,
+    "macro_recall": 0.7528100222250314,
+    "weighted_f1": 0.7802258772754318,
+    "weighted_precision": 0.7875651397210444,
+    "weighted_recall": 0.7805997552019583
+  },
+  "joint_accuracy": 0.716952264381885,
+  "priority_misclassified_count": 645,
+  "queue_misclassified_count": 717,
+  "report_dir": "E:\\APU\\FYP_TP068983\\resources\\model_output\\joint_type_experiment",
+  "selected_cv_accuracy": 0.6670237184391736,
+  "selected_cv_macro_f1": 0.7564561968740133,
+  "selected_model": "linear_svm_joint_by_type",
+  "selected_params": {
+    "base_estimator__classifier__C": 10.0,
+    "base_estimator__text__type_weight": 3,
+    "base_estimator__tfidf__max_df": 1.0,
+    "base_estimator__tfidf__min_df": 1,
+    "base_estimator__tfidf__ngram_range": [
+      1,
+      4
+    ],
+    "class_weight_power": 1.0,
+    "score_temperature": 0.25
+  }
+}

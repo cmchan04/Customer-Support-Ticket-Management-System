@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from ticket_ml.text import TicketTextPreprocessor, preprocess_ticket_text
+from ticket_ml.text import TicketTextPreprocessor, TicketTypeOneHot, preprocess_ticket_text
 
 
 def test_text_preprocessing_is_deterministic_and_removes_noise():
@@ -29,6 +29,28 @@ def test_subject_weight_repeats_subject_without_changing_body_processing():
     assert normal.count("account") == 1
     assert weighted.count("account") == 3
     assert weighted.count("service") == 1
+
+
+def test_type_weight_adds_customer_selected_type():
+    value = preprocess_ticket_text(
+        "Payment issue",
+        "I was charged twice.",
+        ticket_type="Incident",
+        type_weight=2,
+    )
+
+    assert value.count("incident") == 2
+
+
+def test_type_one_hot_handles_known_and_unknown_values():
+    frame = pd.DataFrame({"type": ["Incident", "Request"]})
+    encoder = TicketTypeOneHot().fit(frame)
+
+    known = encoder.transform(frame)
+    unknown = encoder.transform(pd.DataFrame({"type": ["NewType"]}))
+
+    assert known.shape == (2, 2)
+    assert unknown.shape == (1, 2)
 
 
 def test_transformer_requires_subject_and_body_columns():

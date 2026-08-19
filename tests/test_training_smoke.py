@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ticket_ml.predictor import TicketPredictor
-from ticket_ml.training import tune_weighted_svm
+from ticket_ml.training import tune_joint_type
 
 
 def test_all_candidates_train_and_artifacts_round_trip(smoke_training):
@@ -13,6 +13,8 @@ def test_all_candidates_train_and_artifacts_round_trip(smoke_training):
         "logistic_regression",
         "multinomial_naive_bayes",
         "linear_svm",
+        "linear_svm_with_type",
+        "linear_svm_by_type",
         "decision_tree",
         "xgboost",
     }
@@ -20,6 +22,8 @@ def test_all_candidates_train_and_artifacts_round_trip(smoke_training):
         "logistic_regression",
         "multinomial_naive_bayes",
         "linear_svm",
+        "linear_svm_with_type",
+        "linear_svm_by_type",
         "decision_tree",
         "xgboost",
     }
@@ -34,21 +38,27 @@ def test_all_candidates_train_and_artifacts_round_trip(smoke_training):
     assert prediction.priority in {"low", "medium", "high"}
 
 
-def test_weighted_svm_experiment_selects_a_subject_weight(smoke_training):
+def test_joint_type_experiment_round_trips_through_predictor(smoke_training):
     config, _ = smoke_training
     experiment_config = replace(
         config,
-        weighted_svm_subject_weights=(1, 2),
-        weighted_svm_character_max_features=1_000,
+        artifact_dir=config.artifact_dir / "joint",
+        report_dir=config.report_dir / "joint",
+        cache_dir=config.cache_dir / "joint",
+        joint_type_weights=(1,),
+        joint_c=(1.0,),
+        joint_ngram_ranges=((1, 1),),
+        joint_max_features=1_000,
+        joint_class_weight_powers=(1.0,),
     )
 
-    summary = tune_weighted_svm(experiment_config)
+    summary = tune_joint_type(experiment_config)
 
-    assert summary.queue.selected_subject_weight in {1, 2}
-    assert summary.priority.selected_subject_weight in {1, 2}
-    assert len(summary.queue.candidate_results) == 2
-    assert len(summary.priority.candidate_results) == 2
-    assert (
-        summary.artifact_dir / "queue_weighted_word_character_svm_pipeline.joblib"
-    ).is_file()
+    assert (summary.artifact_dir / "joint_pipeline.joblib").is_file()
+    assert (summary.artifact_dir / "metadata.json").is_file()
     assert (summary.report_dir / "metrics.json").is_file()
+    prediction = TicketPredictor.load(summary.artifact_dir).predict(
+        "Billing high request", "Customer reports a billing issue.", "Incident"
+    )
+    assert prediction.queue
+    assert prediction.priority in {"low", "medium", "high"}

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Desktop UI prototype for the customer support ticket system." />
+    <title>Signal Desk — Ticket Operations</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <a class="brand" href="#" data-action="go-dashboard" aria-label="Return to dashboard">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>
+            <strong>Solve Your Inquiries</strong>
+            <small>customer support</small>
+          </span>
+        </a>
+
+        <section class="role-picker" aria-label="Prototype role selector">
+          <span class="eyebrow">Viewing as</span>
+          <div class="role-buttons" role="group" aria-label="Select a prototype role">
+            <button class="role-button" type="button" data-role="customer">Customer</button>
+            <button class="role-button" type="button" data-role="staff">Staff</button>
+            <button class="role-button active" type="button" data-role="admin">Admin</button>
+          </div>
+        </section>
+
+        <nav id="primary-navigation" class="primary-navigation"></nav>
+
+        <div class="sidebar-foot">
+          <div id="account-menu-shell" class="account-menu-shell">
+          <button id="account-menu-trigger" class="user-chip" type="button" data-action="toggle-account-menu" aria-expanded="false" aria-controls="account-menu">
+            <span class="avatar avatar-admin">AT</span>
+            <span>
+              <strong id="user-name">Aisha Tan</strong>
+              <small id="user-role">System administrator</small>
+            </span>
+            <span class="account-menu-caret" aria-hidden="true">•••</span>
+          </button>
+          <div id="account-menu" class="account-popover" role="menu" aria-label="Account menu" hidden>
+            <div class="account-popover-profile"><span>Signed in as</span><strong id="account-menu-name">Aisha Tan</strong><small id="account-menu-role">System administrator</small></div>
+            <div class="account-popover-actions">
+              <button class="account-menu-item" type="button" role="menuitem" data-action="edit-profile">Edit profile</button>
+              <button class="account-menu-item" type="button" role="menuitem" data-action="change-password">Change password</button>
+              <span class="account-menu-divider" aria-hidden="true"></span>
+              <button class="account-menu-item account-menu-danger" type="button" role="menuitem" data-action="log-out">Log out</button>
+            </div>
+          </div>
+          </div>
+          <p class="prototype-note">DESKTOP PROTOTYPE · V0.1</p>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p id="breadcrumb" class="breadcrumb">Administrator / Overview</p>
+            <p class="date-line">Tuesday, 19 August 2026</p>
+          </div>
+          <div class="routing-rail" aria-label="Ticket workflow">
+            <span class="rail-step complete">01 <b>Intake</b></span>
+            <span class="rail-line"></span>
+            <span class="rail-step complete">02 <b>Route</b></span>
+            <span class="rail-line"></span>
+            <span class="rail-step current">03 <b>Work</b></span>
+            <span class="rail-line"></span>
+            <span class="rail-step">04 <b>Resolve</b></span>
+          </div>
+        </header>
+
+        <main id="main-content" class="main-content" tabindex="-1"></main>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

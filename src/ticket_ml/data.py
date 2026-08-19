@@ -70,10 +70,17 @@ def load_and_prepare(config: TrainingConfig) -> PreparedDataset:
         {
             "subject": _normalise_text(english["subject"]),
             "body": _normalise_text(english["body"]),
+            # ``type`` is customer-selectable in the deployed form. Older
+            # fixture files may omit it, so preserve compatibility with an
+            # explicit unknown category rather than inventing a label.
+            "type": _normalise_text(english["type"])
+            if "type" in english
+            else pd.Series("Unknown", index=english.index, dtype="string"),
             "queue": _normalise_text(english["queue"]),
             "priority": _normalise_text(english["priority"]),
         }
     )
+    prepared["type"] = prepared["type"].replace("", "Unknown")
     valid_rows = prepared["body"].ne("") & prepared["queue"].ne("") & prepared["priority"].ne("")
     prepared = prepared.loc[valid_rows].copy()
 
@@ -101,9 +108,10 @@ def load_and_prepare(config: TrainingConfig) -> PreparedDataset:
         "prepared_rows": int(len(prepared)),
         "queue_classes": int(prepared["queue"].nunique()),
         "priority_classes": int(prepared["priority"].nunique()),
+        "type_classes": int(prepared["type"].nunique()),
     }
     return PreparedDataset(
-        features=prepared[["subject", "body"]].copy(),
+        features=prepared[["subject", "body", "type"]].copy(),
         queue=prepared["queue"].copy(),
         priority=prepared["priority"].copy(),
         source_sha256=_file_sha256(config.dataset_path),

@@ -226,3 +226,7 @@ resources/data/
 # Reproducible model binaries and temporary training cache
 artifacts/models/
 artifacts/cache/
+# Keep ad-hoc experiment probes and generated scratch directories out of Git.
+artifacts/*/
+# Temporary parameter-probe reports are not deployment evidence.
+resources/model_output/*_probe/

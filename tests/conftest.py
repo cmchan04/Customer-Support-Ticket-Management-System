@@ -52,5 +52,10 @@ def smoke_training(
         decision_tree_min_samples_leaf=(1,),
         xgboost_max_depth=(3,),
         xgboost_n_estimators=(5,),
+        type_svm_weights=(1,),
+        type_router_weights=(1,),
+        type_router_c=(1.0,),
+        type_router_ngram_ranges=((1, 1),),
+        type_router_max_features=1_000,
     )
     return config, train_all(config)

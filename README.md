@@ -1,8 +1,8 @@
 # Customer Support Ticket Management System
 
 This repository contains the English customer-support ticket classification and
-priority-prediction pipeline for the FYP. It predicts both fields from a
-ticket's `subject` and `body` only.
+priority-prediction pipeline for the FYP. It includes a text-only baseline and
+an optional type-aware model that also accepts a customer-selected ticket type.
 
 ## Prerequisites and one-time setup
 
@@ -55,6 +55,7 @@ invalid text/target rows, and deduplicating identical ticket text.
 | English validated rows used for training | 16,338 |
 | Queue classes | 10 |
 | Priority classes | 3 |
+| Ticket type classes | 4 |
 | Missing subjects treated as empty text | 2,607 |
 | Rows removed as duplicate ticket text | 0 |
 
@@ -81,6 +82,15 @@ invalid text/target rows, and deduplicating identical ticket text.
 | Medium | 6,618 |
 | Low | 3,374 |
 
+### Ticket type distribution
+
+| Ticket type | Tickets |
+| --- | ---: |
+| Incident | 6,571 |
+| Request | 4,665 |
+| Problem | 3,397 |
+| Change | 1,705 |
+
 ## Commands
 
 Activate the virtual environment before running the commands in this section:
@@ -96,36 +106,167 @@ ticket-ml eda --config configs\training.toml
 ```
 
 Train and evaluate all candidate models. This compares Logistic Regression,
-Multinomial Naive Bayes, Linear SVM, Decision Tree, and CPU-based XGBoost
-separately for `queue` and `priority`:
+Multinomial Naive Bayes, global and type-aware Linear SVMs, Decision Tree, and
+CPU-based XGBoost separately for `queue` and `priority`:
 
 ```powershell
 ticket-ml train --config configs\training.toml
 ```
 
-Run the focused subject-weighting experiment. It compares subject-to-body text
-ratios of 1:1, 2:1, 3:1, and 4:1 using a word-and-character TF-IDF Linear SVM;
-the ratio is selected by five-fold cross-validation before one holdout test:
+### Archived subject-weighting experiment
+
+The `tune-weighting` command and its configuration have been retired because
+five-fold cross-validation selected the unchanged 1:1 subject-to-body ratio for
+both targets. Repeating the subject (2:1, 3:1, or 4:1) consistently made the
+model worse. The final word-and-character variant reached 73.90% queue accuracy
+(below the 74.27% text-only baseline) and 75.61% priority accuracy (only 0.15
+percentage points above the 75.46% baseline). It is therefore not part of the
+active training workflow.
+
+Its explanation and disabled source snapshot are in
+[`archive/subject_weighting/`](archive/subject_weighting/). The saved pipelines
+and evaluation reports have been moved to
+`artifacts/archive/subject_weighting/`; they are retained only for historical
+comparison and are not loaded by `ticket-ml predict`.
+
+Run the ticket-type experiment. It uses the customer-selected `Incident`,
+`Request`, `Problem`, or `Change` value, searches type weight, SVM C, and word
+ngram settings, and writes separate artifacts:
 
 ```powershell
-ticket-ml tune-weighting --config configs\training.toml
+ticket-ml tune-type --config configs\training.toml
 ```
 
-Its independent reports are written to `resources/model_output/weighting_experiment/`
-and its experimental pipelines to `artifacts/models/experiments/weighted_svm/`.
-It does not overwrite the standard saved prediction models.
+The reports are written to `resources/model_output/type_experiment/` and the
+experimental pipelines to `artifacts/models/experiments/type_svm/`. The
+standard models are not replaced until the result has been reviewed.
 
-The latest seed-29 weighting experiment selected a 1:1 subject-to-body ratio
-for both targets. Repeating the subject reduced cross-validation performance at
-every tested ratio. The word-and-character model reached 73.90% queue accuracy
-(versus 74.27% for the comparable word-only SVM) and 75.61% priority accuracy
-(versus 75.46%). It therefore does not provide a meaningful route to the 85%
-target on this dataset.
+The latest seed-29 type experiment selected `C=10`, 1--3 word grams, and a
+type weight of 3 for queue; it selected `C=10`, 1--3 word grams, and a type
+weight of 1 for priority. Holdout accuracy was 74.51% for queue and 75.92% for
+priority, compared with 74.27% and 75.46% for the comparable text-only SVM.
+This is a modest improvement, not an 80% result.
+
+For an explicit categorical representation, test a one-hot `type` feature with
+its own weight relative to the TF-IDF text features:
+
+```powershell
+ticket-ml tune-type-onehot --config configs\training.toml
+```
+
+This writes reports to `resources/model_output/type_onehot_experiment/` and
+pipelines to `artifacts/models/experiments/type_onehot/`.
+
+The one-hot search selected a type-feature weight of 0.25 for queue and 0.5
+for priority, both with `C=10`. Holdout accuracy was 74.33% for queue and
+75.43% for priority, so the explicit one-hot representation does not improve
+on the text-only or token-weighted type models.
+
+For a routed type-aware model, train one shared TF-IDF vocabulary and one
+Linear SVM per known ticket type, with a global fallback for unknown types:
+
+```powershell
+ticket-ml tune-type-router --config configs\training.toml
+```
+
+The reports are written to `resources/model_output/type_router_experiment/`
+and the isolated pipelines to `artifacts/models/experiments/type_router/`.
+The latest five-fold seed-29 search selected `C=30` for both targets, with
+1--3 word grams, type weight 1, and class-weight powers 0.5 (queue) and 1.0
+(priority). Queue additionally uses out-of-fold macro-F1 decision calibration.
+Holdout performance was 76.96% queue accuracy (78.90% macro F1) and 78.58%
+priority accuracy (78.19% macro F1); high-priority recall was 81.02%. This is
+the strongest validated
+type-aware experiment so far, but it still does not reach 80% on both targets.
+
+Use the routed artifacts like this:
+
+```powershell
+ticket-ml predict --model-dir artifacts\models\experiments\type_router --ticket-type Incident --subject "Account outage" --body "I cannot access my account after the service interruption."
+```
+
+For the strongest type-aware formulation tested so far, run the optional joint
+experiment. It trains type-routed classifiers for a reversible
+`queue||priority` label, then uses temperature-scaled marginal scores to choose
+queue and priority independently. Selection is performed by five-fold
+training-set cross-validation; the untouched holdout is evaluated only after
+selection:
+
+```powershell
+ticket-ml tune-joint-type --config configs\training.toml
+```
+
+This writes the deployable joint pipeline and its metadata to its own model
+directory, separate from both experiments and the separate queue/priority
+pipelines:
+
+```text
+artifacts/models/joint/joint_pipeline.joblib
+artifacts/models/joint/metadata.json
+```
+
+The queue and priority reports, confusion matrices, ROC/PR plot, and
+misclassification CSVs are written to
+`resources/model_output/joint_type_experiment/`. Use the joint artifact by
+pointing the prediction command at that directory:
+
+```powershell
+ticket-ml predict --model-dir artifacts\models\joint --ticket-type Incident --subject "Account outage" --body "I cannot access my account after the service interruption."
+```
+
+### Interactive terminal menu
+
+Open the local menu for prediction and model retraining:
+
+```powershell
+ticket-ml menu --config configs\training.toml
+```
+
+The menu lets you enter a subject and body, select `Incident`, `Request`,
+`Problem`, or `Change`, then choose either the joint model or the separate
+queue/priority models. It also offers explicit retraining actions for each
+model family. Retraining asks you to type `YES` before overwriting that
+family's current saved artifacts.
+
+```text
+artifacts/models/
+├── queue_pipeline.joblib          # separate queue model
+├── priority_pipeline.joblib       # separate priority model
+└── joint/
+    └── joint_pipeline.joblib      # joint queue + priority model
+```
+
+The completed seed-29 run selected type weight 3, `C=10`, 1--4 word grams,
+class-weight power 1.0, and score temperature 0.25. On the untouched holdout
+it reached 78.06% queue accuracy (79.49% macro F1) and 80.26% priority
+accuracy (79.95% macro F1), with 83.94% high-priority recall. This is the
+best validated configuration in this repository, but queue and macro recall
+remain below an 80% acceptance target; the result must not be described as an
+80%-accurate system for both outputs.
+
+The joint model is optional and does not overwrite the ordinary independent
+queue and priority pipelines. The deployed form must collect the same
+customer-selected type values used during training (`Incident`, `Request`,
+`Problem`, or `Change`). If the type is unknown or omitted, the saved model
+uses its global fallback classifier.
 
 Predict a queue and priority using the saved models:
 
 ```powershell
 ticket-ml predict --model-dir artifacts\models --subject "Account outage" --body "I cannot access my account after the service interruption."
+```
+
+When using a type-aware model, also pass the customer-selected type:
+
+```powershell
+ticket-ml predict --model-dir artifacts\models --ticket-type Incident --subject "Account outage" --body "I cannot access my account after the service interruption."
+```
+
+For the isolated type-aware experiment, use its directory as the model
+directory:
+
+```powershell
+ticket-ml predict --model-dir artifacts\models\experiments\type_svm --ticket-type Incident --subject "Account outage" --body "I cannot access my account after the service interruption."
 ```
 
 Run the automated tests:
@@ -159,17 +300,24 @@ Reports, confusion matrices, ROC/precision-recall plots, and misclassification
 samples are written to `resources/model_output/`. Training replaces the model
 and report files with results from the new run.
 
+If `metadata.json` selects `linear_svm_by_type`, the deployed form must supply
+the same four-value `type` field used during training. The normal `train`
+command also applies the queue calibration step when this candidate wins. If
+the form only has subject and body, deploy a text-only selected pipeline
+instead.
+
 The stored baseline run (before Decision Tree and XGBoost were added) selected
-Linear SVM for both targets, with word 1--3 grams and `C=10`:
+Linear SVM for both targets on the current seed-29 split, with word 1--3 grams
+and `C=10`:
 
 | Target | Holdout accuracy | Macro F1 |
 | --- | ---: | ---: |
-| Queue | 75.40% | 76.44% |
-| Priority | 76.04% | 75.28% |
+| Queue | 74.27% | 75.17% |
+| Priority | 75.46% | 75.00% |
 
-High-priority recall is 81.02%. The configured 90% accuracy quality gate does
+High-priority recall is 78.98%. The configured 90% accuracy quality gate does
 not currently pass, so the result must not be presented as a 90%-accurate
-model. Run the training command again to compare all five algorithms; it will
+model. Run the training command again to compare all seven candidate variants; it will
 replace `resources/model_output/metrics.json` with the updated candidate
 comparison and selected-model metrics. XGBoost is explicitly configured for
 CPU use, matching the rest of this project. Its default comparison uses a
