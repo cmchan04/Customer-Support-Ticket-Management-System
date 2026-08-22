@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from ticket_ml.config import TrainingConfig
@@ -61,6 +61,20 @@ def _parser() -> argparse.ArgumentParser:
     )
     joint_type.add_argument("--config", type=Path, default=_default_config_path())
 
+    merge_it_technical = commands.add_parser(
+        "tune-merge-it-technical",
+        help="Run an isolated experiment merging IT Support into Technical Support",
+    )
+    merge_it_technical.add_argument("--config", type=Path, default=_default_config_path())
+
+    merge_it_technical_joint = commands.add_parser(
+        "tune-merge-it-technical-joint",
+        help="Run an isolated joint experiment merging IT Support into Technical Support",
+    )
+    merge_it_technical_joint.add_argument(
+        "--config", type=Path, default=_default_config_path()
+    )
+
     menu = commands.add_parser(
         "menu", help="Open the interactive terminal menu for prediction and retraining"
     )
@@ -71,6 +85,11 @@ def _parser() -> argparse.ArgumentParser:
     prediction.add_argument("--subject", default="")
     prediction.add_argument("--ticket-type", default="", help="Incident, Request, Problem, or Change")
     prediction.add_argument("--body", required=True)
+    prediction.add_argument(
+        "--with-confidence",
+        action="store_true",
+        help="Include calibrated confidence percentages when the saved artifact supports them",
+    )
     return parser
 
 
@@ -102,6 +121,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = tune_joint_type(TrainingConfig.from_toml(args.config))
         print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
         return 0
+    if args.command == "tune-merge-it-technical":
+        base_config = TrainingConfig.from_toml(args.config)
+        experiment_config = replace(
+            base_config,
+            artifact_dir=base_config.artifact_dir / "experiments" / "merge_it_technical",
+            report_dir=base_config.report_dir / "merge_it_technical_experiment",
+            cache_dir=base_config.cache_dir / "merge_it_technical_experiment",
+            queue_label_map=(("IT Support", "Technical Support"),),
+        )
+        summary = train_all(experiment_config)
+        print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+        return 0
+    if args.command == "tune-merge-it-technical-joint":
+        base_config = TrainingConfig.from_toml(args.config)
+        experiment_config = replace(
+            base_config,
+            queue_label_map=(("IT Support", "Technical Support"),),
+        )
+        summary = tune_joint_type(
+            experiment_config,
+            artifact_dir=(
+                base_config.artifact_dir
+                / "experiments"
+                / "merge_it_technical_joint"
+            ),
+            report_dir=base_config.report_dir / "merge_it_technical_joint_experiment",
+            cache_dir=base_config.cache_dir / "merge_it_technical_joint_experiment",
+        )
+        print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+        return 0
     if args.command == "menu":
         TerminalMenu(TrainingConfig.from_toml(args.config)).run()
         return 0
@@ -110,8 +159,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(asdict(summary), indent=2, default=str, sort_keys=True))
         return 0
     if args.command == "predict":
-        prediction = TicketPredictor.load(args.model_dir).predict(
-            args.subject, args.body, args.ticket_type
+        predictor = TicketPredictor.load(args.model_dir)
+        prediction = (
+            predictor.predict_scored(args.subject, args.body, args.ticket_type)
+            if args.with_confidence
+            else predictor.predict(args.subject, args.body, args.ticket_type)
         )
         print(json.dumps(asdict(prediction), sort_keys=True))
         return 0

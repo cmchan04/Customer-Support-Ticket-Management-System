@@ -81,6 +81,8 @@ def load_and_prepare(config: TrainingConfig) -> PreparedDataset:
         }
     )
     prepared["type"] = prepared["type"].replace("", "Unknown")
+    if config.queue_label_map:
+        prepared["queue"] = prepared["queue"].replace(dict(config.queue_label_map))
     valid_rows = prepared["body"].ne("") & prepared["queue"].ne("") & prepared["priority"].ne("")
     prepared = prepared.loc[valid_rows].copy()
 

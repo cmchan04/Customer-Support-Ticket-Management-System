@@ -15,6 +15,10 @@ class TrainingConfig:
     artifact_dir: Path
     report_dir: Path
     cache_dir: Path
+    # Optional label remapping used by isolated experiments. Production
+    # training leaves this empty; experiments can merge labels without
+    # changing the source CSV or deployed artifacts.
+    queue_label_map: tuple[tuple[str, str], ...] = ()
     random_seed: int = 42
     test_size: float = 0.20
     cv_folds: int = 5
@@ -55,6 +59,12 @@ class TrainingConfig:
         1.0,
         1.5,
     )
+    # LinearSVC has no native probabilities. After model selection, the
+    # winning SVM receives a separate cross-validated sigmoid layer used only
+    # to report prediction confidence.
+    svm_probability_calibration: bool = True
+    svm_probability_calibration_cv_folds: int = 3
+    svm_probability_calibration_method: str = "sigmoid"
     # The joint experiment predicts queue||priority as one label while still
     # routing to a classifier trained for the customer-selected ticket type.
     # The defaults are intentionally small: this is an optional, CPU-bound
@@ -86,6 +96,10 @@ class TrainingConfig:
             artifact_dir=resolve(training["artifact_dir"]),
             report_dir=resolve(training["report_dir"]),
             cache_dir=resolve(training["cache_dir"]),
+            queue_label_map=tuple(
+                (str(source), str(target))
+                for source, target in training.get("queue_label_map", {}).items()
+            ),
             random_seed=int(training["random_seed"]),
             test_size=float(training["test_size"]),
             cv_folds=int(training["cv_folds"]),
@@ -149,6 +163,15 @@ class TrainingConfig:
                     (-1.5, -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5),
                 )
             ),
+            svm_probability_calibration=bool(
+                search.get("svm_probability_calibration", True)
+            ),
+            svm_probability_calibration_cv_folds=int(
+                search.get("svm_probability_calibration_cv_folds", 3)
+            ),
+            svm_probability_calibration_method=str(
+                search.get("svm_probability_calibration_method", "sigmoid")
+            ),
             joint_type_weights=tuple(
                 int(value) for value in search.get("joint_type_weights", (3,))
             ),
@@ -173,4 +196,5 @@ class TrainingConfig:
         values = asdict(self)
         for name in ("dataset_path", "artifact_dir", "report_dir", "cache_dir"):
             values[name] = str(values[name])
+        values["queue_label_map"] = dict(values["queue_label_map"])
         return values

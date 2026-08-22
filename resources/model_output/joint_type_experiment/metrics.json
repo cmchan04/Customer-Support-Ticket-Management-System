@@ -41,7 +41,7 @@
       "c": 10.0,
       "class_weight_power": 1.25,
       "cv_accuracy": 0.6642693190512624,
-      "cv_macro_f1": 0.7550673156994903,
+      "cv_macro_f1": 0.7550790336157732,
       "ngram_range": [
         1,
         3
@@ -64,8 +64,8 @@
     {
       "c": 10.0,
       "class_weight_power": 1.0,
-      "cv_accuracy": 0.6670237184391736,
-      "cv_macro_f1": 0.7564561968740133,
+      "cv_accuracy": 0.6671002295332824,
+      "cv_macro_f1": 0.7565012821201064,
       "ngram_range": [
         1,
         4
@@ -98,6 +98,7 @@
       "type_weight": 3
     }
   ],
+  "confidence_method": "sigmoid_calibrated_probability",
   "holdout_priority_metrics": {
     "accuracy": 0.8026315789473685,
     "high_priority_recall": 0.8393700787401575,
@@ -121,8 +122,8 @@
   "priority_misclassified_count": 645,
   "queue_misclassified_count": 717,
   "report_dir": "E:\\APU\\FYP_TP068983\\resources\\model_output\\joint_type_experiment",
-  "selected_cv_accuracy": 0.6670237184391736,
-  "selected_cv_macro_f1": 0.7564561968740133,
+  "selected_cv_accuracy": 0.6671002295332824,
+  "selected_cv_macro_f1": 0.7565012821201064,
   "selected_model": "linear_svm_joint_by_type",
   "selected_params": {
     "base_estimator__classifier__C": 10.0,

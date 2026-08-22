@@ -28,19 +28,42 @@ const roleDefinitions = {
       ["01", "Overview", "dashboard"],
       ["02", "Ticket management", "tickets", "42"],
       ["03", "Model centre", "models"],
-      ["04", "Users", "users"],
-      ["05", "Queues", "queues"],
+      ["04", "Queues & staff", "users"],
       ["—", "Records"],
-      ["06", "Activity & audit log", "activity"],
+      ["05", "Activity & audit log", "activity"],
     ],
   },
 };
 
 const PROTOTYPE_TODAY = new Date("2026-08-19T12:00:00");
+const CUSTOMER_REPLY_WINDOW_MS = 86_400_000;
 const CUSTOMER_CLOSURE_WINDOW_DAYS = 3;
-const CLOSED_TICKETS_PAGE_SIZE = 5;
+const TICKET_TABLE_PAGE_SIZE = 10;
+const TICKET_TABLE_PREVIEW_SIZE = 5;
+const queueDashboardPeriods = [
+  { key: "week", label: "This week", factor: 0.22, slaOffset: 2, graphLabels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+  { key: "month", label: "This month", factor: 1, slaOffset: 0, graphLabels: ["Week 1", "Week 2", "Week 3", "Week 4"] },
+  { key: "quarter", label: "This quarter", factor: 3.05, slaOffset: -1, graphLabels: ["Jun", "Jul", "Aug"] },
+  { key: "year", label: "This year", factor: 12.2, slaOffset: -2, graphLabels: ["Q1", "Q2", "Q3", "Q4"] },
+];
 
 const state = {
+  authenticated: false,
+  serverBacked: false,
+  serverLoading: false,
+  serverError: "",
+  ticketDetails: new Map(),
+  serverData: {
+    customer: null,
+    staff: null,
+    staffPerformance: null,
+    adminOverview: null,
+    adminManagement: null,
+    queuesStaff: null,
+    audit: null,
+    deployments: null,
+    modelOperational: null,
+  },
   role: "admin",
   page: "dashboard",
   activeModel: "joint",
@@ -49,22 +72,47 @@ const state = {
   customerTicketDialog: null,
   staffTicketDialog: null,
   adminTicketDialog: null,
+  ticketDetailLoading: new Set(),
+  pendingActions: new Set(),
+  staffUserDialog: null,
+  staffQueueFilter: "all",
+  queueDashboardPeriod: "month",
+  staffUserResolvedPeriod: "month",
+  staffDeleteConfirmId: null,
   activeDraftId: null,
+  customerFormRequestKey: "",
+  customerActionPending: false,
+  emptyDraftPrompt: false,
   pendingClosureTicketIds: new Set(),
   customerResolutionDates: new Map([["TKT-000104", "2026-08-17T09:00:00"]]),
+  waitingForCustomerSince: new Map([["TKT-000119", "2026-08-18T10:00:00"]]),
+  automaticallyResolvedTicketIds: new Set(),
+  systemClosedTickets: new Map(),
+  forceClosedTickets: new Map(),
   discardedDraftIds: new Set(),
   accountMenuOpen: false,
   accountReturnPage: "dashboard",
   staffResolvedPeriod: "today",
   staffPerformancePeriod: "week",
-  closedTicketsPage: 1,
+  staffPerformancePage: 1,
+  customerTicketsPage: 1,
+  staffTicketPoolPage: 1,
+  staffMyTicketsPage: 1,
+  adminAttentionPage: 1,
+  adminAllTicketsPage: 1,
+  adminTicketFiltersOpen: false,
+  adminTicketSearch: "",
+  adminTicketFilters: { model: "all", type: "all", queue: "all", priority: "all", status: "all", assignee: "all" },
+  adminTicketSort: { key: "updated", direction: "desc" },
   ticketPoolFiltersOpen: false,
   ticketPoolFilters: { priority: "all", type: "all" },
   ticketPoolSort: { key: "ticketId", direction: "desc" },
   myTicketsFiltersOpen: false,
   myTicketsFilters: { priority: "all", status: "all" },
+  myTicketsSearch: "",
   myTicketsSort: { key: "lastUpdated", direction: "asc" },
   claimedTicketAssignments: new Map(),
+  staffReroutedTicketIds: new Set(),
   adminActivityView: "feed",
   auditQuery: "",
   auditCategory: "all",
@@ -77,7 +125,7 @@ const customerTickets = [
     id: "TKT-000128",
     subject: "Unable to access the staff portal",
     priority: "High",
-    status: ["Waiting for you", "waiting"],
+    status: ["Waiting for Customer", "waiting"],
     updated: "18 min ago",
     updatedDetail: "18 minutes ago",
     request: "I cannot access the staff portal after signing in. The page returns me to the login screen.",
@@ -87,7 +135,7 @@ const customerTickets = [
     id: "TKT-000121",
     subject: "Please update my billing address",
     priority: "Medium",
-    status: ["In progress", "progress"],
+    status: ["Waiting for Support", "waiting"],
     updated: "Yesterday",
     updatedDetail: "Yesterday",
     request: "I moved recently and need the billing address on my account updated before the next invoice is issued.",
@@ -97,7 +145,7 @@ const customerTickets = [
     id: "TKT-000107",
     subject: "Request for a service quotation",
     priority: "Low",
-    status: ["Resolved", "resolved"],
+    status: ["Closed", "resolved"],
     updated: "12 Aug",
     updatedDetail: "12 August",
     request: "Please provide a quotation for an annual service plan for our team.",
@@ -114,13 +162,16 @@ const customerDrafts = [
     updated: "Today, 09:18",
   },
 ];
+const customerPreviewTickets = [];
+const customerReplyPreviewTickets = [];
 
 const staffAssignedTickets = [
-  { id: "TKT-000126", subject: "Password reset email does not arrive", createdBy: "Daniel Wong", type: "Incident", priority: "High", status: ["Reply needed", "waiting"], updated: "42 min ago", updatedOrder: 42 },
-  { id: "TKT-000132", subject: "VPN connection drops after password change", createdBy: "Lina Tan", type: "Incident", priority: "High", status: ["In progress", "progress"], updated: "2 h ago", updatedOrder: 120 },
-  { id: "TKT-000119", subject: "System is slow after the latest update", createdBy: "Jessica Low", type: "Problem", priority: "Medium", status: ["Waiting for customer", "waiting"], updated: "Yesterday", updatedOrder: 1440 },
-  { id: "TKT-000104", subject: "Unable to install the desktop client", createdBy: "Mohd Firdaus", type: "Request", priority: "Low", status: ["In progress", "progress"], updated: "12 Aug", updatedOrder: 11520 },
+  { id: "TKT-000126", subject: "Password reset email does not arrive", createdBy: "Daniel Wong", type: "Incident", priority: "High", status: ["Waiting for Support", "waiting"], updated: "42 min ago", updatedOrder: 42 },
+  { id: "TKT-000132", subject: "VPN connection drops after password change", createdBy: "Lina Tan", type: "Incident", priority: "High", status: ["Waiting for Support", "waiting"], updated: "2 h ago", updatedOrder: 120 },
+  { id: "TKT-000119", subject: "System is slow after the latest update", createdBy: "Jessica Low", type: "Problem", priority: "Medium", status: ["Waiting for Customer", "waiting"], updated: "Yesterday", updatedOrder: 1440 },
+  { id: "TKT-000104", subject: "Unable to install the desktop client", createdBy: "Mohd Firdaus", type: "Request", priority: "Low", status: ["Resolved", "resolved"], updated: "12 Aug", updatedOrder: 11520 },
 ];
+const staffPreviewTickets = [];
 
 const ticketPoolTickets = [
   { id: "TKT-000128", subject: "Unable to access the staff portal", createdBy: "Maya Lim", type: "Incident", priority: "High", createdAt: "18 min ago", createdOrder: 18 },
@@ -144,23 +195,10 @@ const staffTicketConversations = {
   "TKT-000111": { customerMessage: "I need help configuring the desktop application for the first time. I am not sure which settings are required.", staffMessage: "No reply has been sent yet. Send the setup guide that matches the customer's operating system." },
 };
 
-const staffClosedTicketHistory = [
-  { id: "TKT-000098", subject: "Browser certificate warning", createdBy: "Alicia Yeo", type: "Incident", priority: "Medium", status: ["Closed", "resolved"], closedAt: "Today, 11:16", closedOrder: 10, resolvedIn: "1 h 26 min" },
-  { id: "TKT-000091", subject: "Desktop client sign-in issue", createdBy: "Hakim Salleh", type: "Incident", priority: "High", status: ["Closed", "resolved"], closedAt: "Today, 09:42", closedOrder: 9, resolvedIn: "2 h 08 min" },
-  { id: "TKT-000086", subject: "VPN profile needs updating", createdBy: "Nadia Osman", type: "Request", priority: "Low", status: ["Closed", "resolved"], closedAt: "Yesterday", closedOrder: 8, resolvedIn: "3 h 01 min" },
-  { id: "TKT-000081", subject: "Desktop application crashes on launch", createdBy: "Jason Goh", type: "Incident", priority: "High", status: ["Closed", "resolved"], closedAt: "Yesterday", closedOrder: 7, resolvedIn: "2 h 34 min" },
-  { id: "TKT-000075", subject: "Cannot complete multi-factor setup", createdBy: "Nur Syafiqah", type: "Request", priority: "Medium", status: ["Closed", "resolved"], closedAt: "16 Aug", closedOrder: 6, resolvedIn: "1 h 49 min" },
-  { id: "TKT-000072", subject: "Recurring VPN authentication prompt", createdBy: "Yong Wei", type: "Problem", priority: "High", status: ["Closed", "resolved"], closedAt: "15 Aug", closedOrder: 5, resolvedIn: "2 h 17 min" },
-  { id: "TKT-000065", subject: "Desktop client sync failure", createdBy: "Siti Hajar", type: "Problem", priority: "Medium", status: ["Closed", "resolved"], closedAt: "13 Aug", closedOrder: 4, resolvedIn: "3 h 04 min" },
-  { id: "TKT-000053", subject: "Account recovery cannot complete", createdBy: "Kai Ling", type: "Incident", priority: "High", status: ["Closed", "resolved"], closedAt: "11 Aug", closedOrder: 3, resolvedIn: "4 h 11 min" },
-  { id: "TKT-000047", subject: "VPN client fails after update", createdBy: "Mohan Kumar", type: "Incident", priority: "Medium", status: ["Closed", "resolved"], closedAt: "8 Aug", closedOrder: 2, resolvedIn: "2 h 56 min" },
-  { id: "TKT-000041", subject: "Network printer unavailable", createdBy: "Evelyn Tan", type: "Request", priority: "Low", status: ["Closed", "resolved"], closedAt: "5 Aug", closedOrder: 1, resolvedIn: "1 h 37 min" },
-];
-
 const accountProfiles = {
-  customer: { id: "customer-maya-lim", firstName: "Maya", lastName: "Lim", email: "maya.lim@example.com", phone: "+60 12-345 6789" },
-  staff: { id: "staff-arun-patel", firstName: "Arun", lastName: "Patel", email: "arun.patel@example.com", phone: "+60 12-456 7890" },
-  admin: { id: "admin-aisha-tan", firstName: "Aisha", lastName: "Tan", email: "aisha.tan@example.com", phone: "+60 12-567 8901" },
+  customer: { id: "customer-maya-lim", firstName: "Maya", lastName: "Lim", email: "maya.lim@gmail.com", phone: "+60 12-345 6789" },
+  staff: { id: "staff-arun-patel", firstName: "Arun", lastName: "Patel", email: "arun.patel@outlook.com", phone: "+60 12-456 7890" },
+  admin: { id: "admin-aisha-tan", firstName: "Aisha", lastName: "Tan", email: "aisha.tan@gmail.com", phone: "+60 12-567 8901" },
 };
 
 const adminActivityEvents = [
@@ -188,16 +226,44 @@ const adminTickets = [
   { id: "TKT-000117", subject: "Unable to classify customer request", customer: "Yuki Tan", type: "Request", request: "I submitted a request for help but the system could not determine which support team should receive it.", priority: null, model: "Joint", queue: "", assignee: "Unassigned", status: ["Open", "open"], updated: "Yesterday", routingFailed: true, reopened: false },
   { id: "TKT-000112", subject: "Account access request needs routing", customer: "Leon Ng", type: "Request", request: "I need access to a company application, but I am not sure which support team manages the required permissions.", priority: null, model: "Joint", queue: "", assignee: "Unassigned", status: ["Open", "open"], updated: "Today, 10:48", routingFailed: true, reopened: false },
   { id: "TKT-000103", subject: "Product issue has no supported category", customer: "Nabila Ibrahim", type: "Incident", request: "The product stopped working after an update, but none of the available categories describe the issue correctly.", priority: null, model: "Separate", queue: "", assignee: "Unassigned", status: ["Open", "open"], updated: "Today, 09:58", routingFailed: true, reopened: false },
-  { id: "TKT-000121", subject: "Please update my billing address", customer: "Maya Lim", type: "Request", request: "I reopened this request because the billing address shown on my account still has not changed.", priority: "Medium", model: "Separate", queue: "Billing and Payments", assignee: "Billing team", status: ["Reopened", "reopened"], updated: "Yesterday, 16:18", routingFailed: false, reopened: true },
-  { id: "TKT-000128", subject: "Unable to access the staff portal", customer: "Maya Lim", type: "Incident", request: "I cannot access the staff portal after signing in. The page returns me to the login screen.", priority: "High", model: "Joint", queue: "Technical Support", assignee: "Arun Patel", status: ["Open", "open"], updated: "18 min ago", routingFailed: false, reopened: false },
-  { id: "TKT-000125", subject: "Charge appears twice on invoice", customer: "Amir Hasan", type: "Incident", request: "The same monthly charge appears twice on my invoice and I need it reviewed before the payment due date.", priority: "High", model: "Separate", queue: "Billing and Payments", assignee: "Billing team", status: ["In progress", "progress"], updated: "39 min ago", routingFailed: false, reopened: false },
-  { id: "TKT-000118", subject: "Company VPN access is still unavailable", customer: "Rina Abdullah", type: "Incident", request: "I still cannot connect to the company VPN and need access restored before I can continue my work.", priority: "Medium", model: "Joint", queue: "Technical Support", assignee: "Arun Patel", status: ["Open", "open"], updated: "Yesterday, 13:20", routingFailed: false, reopened: false, overdue: true, overdueLabel: "2 h overdue" },
-  { id: "TKT-000110", subject: "Refund request has not been reviewed", customer: "Wei Jian", type: "Request", request: "I submitted a refund request but have not received an update on its review or the next step.", priority: "Low", model: "Separate", queue: "Billing and Payments", assignee: "Billing team", status: ["In progress", "progress"], updated: "Yesterday, 10:12", routingFailed: false, reopened: false, overdue: true, overdueLabel: "1 day overdue" },
-  { id: "TKT-000104", subject: "Unable to install the desktop client", customer: "Mohd Firdaus", type: "Request", request: "I need help installing the desktop client on my work computer. The setup stops before the installation is complete.", priority: "Low", model: "Joint", queue: "Technical Support", assignee: "Arun Patel", status: ["Customer resolved", "pending-close"], updated: "12 Aug", routingFailed: false, reopened: false },
+  { id: "TKT-000121", subject: "Please update my billing address", customer: "Maya Lim", type: "Request", request: "I reopened this request because the billing address shown on my account still has not changed.", priority: "Medium", model: "Separate", queue: "Billing and Payments", assignee: "Billing team", status: ["Reopened", "reopened"], updated: "Yesterday, 16:18", routingFailed: false, reopened: true, predictionConfidence: { queue: 84, priority: 78 } },
+  { id: "TKT-000128", subject: "Unable to access the staff portal", customer: "Maya Lim", type: "Incident", request: "I cannot access the staff portal after signing in. The page returns me to the login screen.", priority: "High", model: "Joint", queue: "Technical Support", assignee: "Arun Patel", status: ["Waiting for Customer", "waiting"], updated: "18 min ago", routingFailed: false, reopened: false, predictionConfidence: { queue: 91, priority: 87 } },
+  { id: "TKT-000125", subject: "Charge appears twice on invoice", customer: "Amir Hasan", type: "Incident", request: "The same monthly charge appears twice on my invoice and I need it reviewed before the payment due date.", priority: "High", model: "Separate", queue: "Billing and Payments", assignee: "Billing team", status: ["Waiting for Support", "waiting"], updated: "39 min ago", routingFailed: false, reopened: false, predictionConfidence: { queue: 89, priority: 85 } },
+  { id: "TKT-000118", subject: "Company VPN access is still unavailable", customer: "Rina Abdullah", type: "Incident", request: "I still cannot connect to the company VPN and need access restored before I can continue my work.", priority: "Medium", model: "Joint", queue: "Technical Support", assignee: "Arun Patel", status: ["Waiting for Support", "waiting"], updated: "Yesterday, 13:20", routingFailed: false, reopened: false, overdue: true, overdueLabel: "2 h overdue", predictionConfidence: { queue: 86, priority: 74 } },
+  { id: "TKT-000110", subject: "Refund request has not been reviewed", customer: "Wei Jian", type: "Request", request: "I submitted a refund request but have not received an update on its review or the next step.", priority: "Low", model: "Separate", queue: "Billing and Payments", assignee: "Billing team", status: ["Waiting for Support", "waiting"], updated: "Yesterday, 10:12", routingFailed: false, reopened: false, overdue: true, overdueLabel: "1 day overdue", predictionConfidence: { queue: 82, priority: 79 } },
+  { id: "TKT-000104", subject: "Unable to install the desktop client", customer: "Mohd Firdaus", type: "Request", request: "I need help installing the desktop client on my work computer. The setup stops before the installation is complete.", priority: "Low", model: "Joint", queue: "Technical Support", assignee: "Arun Patel", status: ["Resolved", "resolved"], updated: "12 Aug", routingFailed: false, reopened: false, predictionConfidence: { queue: 88, priority: 76 } },
 ];
+const serverAdminAttentionTickets = [];
 
 const adminQueueOptions = ["Technical Support", "Product Support", "Customer Service", "Billing and Payments"];
-const adminAssigneeOptions = ["Unassigned", "Arun Patel", "Priya Nair", "Billing team", "Product Support team"];
+const adminPriorityOptions = ["High", "Medium", "Low"];
+const staffQueueOptions = ["Technical Support", "Product Support", "Customer Service", "Billing and Payments", "IT Support", "Returns and Exchanges", "Service Outages and Maintenance", "Sales and Pre-Sales", "Human Resources", "General Inquiry"];
+const staffUsers = [
+  { id: "staff-arun-patel", firstName: "Arun", lastName: "Patel", email: "arun.patel@outlook.com", phone: "+60 12-456 7890", queue: "Technical Support", title: "Support specialist", status: "Available", activeTickets: 4, waitingReply: 1, resolved: { today: { count: 2, sla: "100%", time: "2 h 18 min" }, week: { count: 11, sla: "94%", time: "2 h 47 min" }, month: { count: 43, sla: "92%", time: "3 h 06 min" } } },
+  { id: "staff-siti-aziz", firstName: "Siti", lastName: "Aziz", email: "siti.aziz@yahoo.com", phone: "+60 12-321 7788", queue: "Technical Support", title: "Support specialist", status: "In a ticket", activeTickets: 5, waitingReply: 2, resolved: { today: { count: 3, sla: "100%", time: "2 h 11 min" }, week: { count: 14, sla: "96%", time: "2 h 38 min" }, month: { count: 51, sla: "93%", time: "2 h 59 min" } } },
+  { id: "staff-priya-nair", firstName: "Priya", lastName: "Nair", email: "priya.nair@outlook.com", phone: "+60 12-765 3301", queue: "Product Support", title: "Product support analyst", status: "Available", activeTickets: 3, waitingReply: 0, resolved: { today: { count: 2, sla: "100%", time: "2 h 41 min" }, week: { count: 9, sla: "95%", time: "3 h 02 min" }, month: { count: 36, sla: "91%", time: "3 h 22 min" } } },
+  { id: "staff-james-wong", firstName: "James", lastName: "Wong", email: "james.wong@hotmail.com", phone: "+60 12-210 8843", queue: "Product Support", title: "Product support analyst", status: "Away", activeTickets: 4, waitingReply: 1, resolved: { today: { count: 1, sla: "100%", time: "2 h 55 min" }, week: { count: 8, sla: "92%", time: "3 h 15 min" }, month: { count: 31, sla: "90%", time: "3 h 36 min" } } },
+  { id: "staff-nur-aina", firstName: "Nur", lastName: "Aina", email: "nur.aina.azman@gmail.com", phone: "+60 12-918 4421", queue: "Customer Service", title: "Customer service specialist", status: "Available", activeTickets: 2, waitingReply: 0, resolved: { today: { count: 4, sla: "100%", time: "1 h 49 min" }, week: { count: 16, sla: "97%", time: "2 h 09 min" }, month: { count: 62, sla: "95%", time: "2 h 28 min" } } },
+  { id: "staff-farah-ismail", firstName: "Farah", lastName: "Ismail", email: "farah.ismail@yahoo.com", phone: "+60 12-344 9082", queue: "Customer Service", title: "Customer service specialist", status: "In a ticket", activeTickets: 5, waitingReply: 2, resolved: { today: { count: 3, sla: "100%", time: "1 h 57 min" }, week: { count: 13, sla: "95%", time: "2 h 19 min" }, month: { count: 55, sla: "93%", time: "2 h 37 min" } } },
+  { id: "staff-kavitha-devi", firstName: "Kavitha", lastName: "Devi", email: "kavitha.devi@gmail.com", phone: "+60 12-630 1157", queue: "Billing and Payments", title: "Billing support specialist", status: "Available", activeTickets: 3, waitingReply: 1, resolved: { today: { count: 2, sla: "100%", time: "2 h 26 min" }, week: { count: 10, sla: "93%", time: "2 h 54 min" }, month: { count: 39, sla: "90%", time: "3 h 18 min" } } },
+  { id: "staff-lee-chen", firstName: "Lee", lastName: "Chen", email: "lee.chen@outlook.com", phone: "+60 12-404 6622", queue: "Billing and Payments", title: "Billing support specialist", status: "Away", activeTickets: 2, waitingReply: 0, resolved: { today: { count: 1, sla: "100%", time: "2 h 33 min" }, week: { count: 7, sla: "94%", time: "3 h 07 min" }, month: { count: 29, sla: "91%", time: "3 h 29 min" } } },
+];
+// The staff directory is intentionally replaceable by the selected queue
+// filter. Assignment dialogs use this separate collection so that a page
+// filter can never hide valid assignees for another route queue.
+const assignmentStaffUsers = staffUsers.map((user) => ({ ...user }));
+const queueDashboardMetrics = [
+  { queue: "Technical Support", backlog: 18, unassigned: 6, highPriority: 3, sla: "92%" },
+  { queue: "Product Support", backlog: 14, unassigned: 4, highPriority: 2, sla: "94%" },
+  { queue: "Customer Service", backlog: 13, unassigned: 3, highPriority: 1, sla: "95%" },
+  { queue: "Billing and Payments", backlog: 10, unassigned: 2, highPriority: 2, sla: "91%" },
+  { queue: "IT Support", backlog: 7, unassigned: 3, highPriority: 1, sla: "93%" },
+  { queue: "Returns and Exchanges", backlog: 6, unassigned: 1, highPriority: 0, sla: "96%" },
+  { queue: "Service Outages and Maintenance", backlog: 5, unassigned: 2, highPriority: 2, sla: "89%" },
+  { queue: "Sales and Pre-Sales", backlog: 4, unassigned: 1, highPriority: 0, sla: "97%" },
+  { queue: "Human Resources", backlog: 3, unassigned: 0, highPriority: 0, sla: "98%" },
+  { queue: "General Inquiry", backlog: 8, unassigned: 4, highPriority: 1, sla: "94%" },
+];
 const adminOverviewPeriods = [
   { key: "day", label: "Today", ticketsProcessed: 9, openBacklog: 8, highPriority: 2, routeCorrections: 0 },
   { key: "week", label: "This week", ticketsProcessed: 46, openBacklog: 11, highPriority: 3, routeCorrections: 3 },
@@ -320,16 +386,512 @@ const breadcrumb = document.querySelector("#breadcrumb");
 const toast = document.querySelector("#toast");
 const accountMenu = document.querySelector("#account-menu");
 const accountMenuTrigger = document.querySelector("#account-menu-trigger");
+const loginScreen = document.querySelector("#login-screen");
+const appShell = document.querySelector(".app-shell");
+let toastTimer;
+let lastRenderPageKey = "";
+let lastRenderDialogKey = "";
+
+function getPrototypeRoleForEmail(email) {
+  const knownRoles = {
+    "maya.lim@gmail.com": "customer",
+    "arun.patel@outlook.com": "staff",
+    "aisha.tan@gmail.com": "admin",
+  };
+  return knownRoles[email.trim().toLowerCase()] || "customer";
+}
+
+function showLoginScreen() {
+  state.authenticated = false;
+  appShell.hidden = true;
+  loginScreen.hidden = false;
+  window.ticketMotion?.enterLogin(loginScreen);
+  window.setTimeout(() => document.querySelector("#login-email")?.focus(), 0);
+}
+
+function startPrototypeSession(email) {
+  state.authenticated = true;
+  const beginSession = () => {
+    loginScreen.hidden = true;
+    appShell.hidden = false;
+    setRole(getPrototypeRoleForEmail(email));
+  };
+  if (window.ticketMotion) window.ticketMotion.leaveLogin(loginScreen, beginSession);
+  else beginSession();
+}
+
+function getServerSession() {
+  const session = window.ticketServerSession;
+  return session?.authenticated ? session : null;
+}
+
+function serverSessionIsActive() {
+  return Boolean(state.serverBacked && getServerSession());
+}
+
+function shouldRefreshRolePage(page = state.page) {
+  if (!serverSessionIsActive()) return false;
+  if (state.role === "customer") return ["dashboard", "tickets"].includes(page);
+  if (state.role === "staff") return ["dashboard", "unassigned", "assigned", "performance"].includes(page);
+  return false;
+}
+
+function refreshAfterPageNavigation() {
+  if (shouldRefreshRolePage()) void refreshServerData();
+}
+
+function getServerCsrfToken() {
+  return getServerSession()?.csrfToken || "";
+}
+
+function createCustomerRequestKey() {
+  return window.crypto?.randomUUID?.()
+    || `ticket-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function ensureCustomerFormRequestKey() {
+  if (!state.customerFormRequestKey) state.customerFormRequestKey = createCustomerRequestKey();
+  return state.customerFormRequestKey;
+}
+
+function setCustomerTicketActionPending(form, pending, action = "") {
+  state.customerActionPending = pending;
+  if (!form?.isConnected) return;
+  form.setAttribute("aria-busy", String(pending));
+  form.querySelectorAll("button").forEach((button) => {
+    button.disabled = pending;
+    if (pending && !button.dataset.idleLabel) button.dataset.idleLabel = button.textContent;
+    if (pending && button.type !== "button") button.textContent = action === "submit" ? "Submitting…" : "Working…";
+    if (!pending && button.dataset.idleLabel) {
+      button.textContent = button.dataset.idleLabel;
+      delete button.dataset.idleLabel;
+    }
+  });
+}
+
+function ticketActionKey(role, ticketId) {
+  return `ticket:${role}:${ticketId}`;
+}
+
+function findTicketActionButton(action, ticketId) {
+  return [...document.querySelectorAll(`[data-action="${action}"]`)]
+    .find((button) => button.dataset.ticketId === ticketId) || null;
+}
+
+function setActionScopePending(scope, pending, label = "Working…") {
+  if (!scope?.isConnected) return;
+  scope.setAttribute("aria-busy", String(pending));
+  scope.classList.toggle("is-action-pending", pending);
+  const buttons = scope.matches?.("button") ? [scope, ...scope.querySelectorAll("button")] : [...scope.querySelectorAll("button")];
+  buttons.forEach((button) => {
+    if (pending) {
+      button.dataset.actionPendingDisabled = String(button.disabled);
+      button.disabled = true;
+      if ((button === scope || button.type === "submit") && !button.dataset.actionPendingLabel) {
+        button.dataset.actionPendingLabel = button.textContent;
+        button.textContent = label;
+      }
+    } else {
+      button.disabled = button.dataset.actionPendingDisabled === "true";
+      delete button.dataset.actionPendingDisabled;
+      if (button.dataset.actionPendingLabel) {
+        button.textContent = button.dataset.actionPendingLabel;
+        delete button.dataset.actionPendingLabel;
+      }
+    }
+  });
+}
+
+function beginPendingAction(key, scope, label = "Working…") {
+  if (state.pendingActions.has(key)) return false;
+  state.pendingActions.add(key);
+  setActionScopePending(scope, true, label);
+  return true;
+}
+
+function finishPendingAction(key, scope) {
+  state.pendingActions.delete(key);
+  setActionScopePending(scope, false);
+}
+
+async function serverRequest(path, { method = "GET", body, idempotencyKey } = {}) {
+  const headers = { Accept: "application/json" };
+  const request = { method, credentials: "same-origin", headers };
+  if (method !== "GET") {
+    headers["Content-Type"] = "application/json";
+    headers["X-CSRFToken"] = getServerCsrfToken();
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+    request.body = JSON.stringify(body || {});
+  }
+  const response = await fetch(path, request);
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    const error = new Error(payload.detail || payload.error || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+function serverUrl(path, params = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== ""),
+  );
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
+function replaceCollection(target, values) {
+  target.splice(0, target.length, ...(values || []));
+}
+
+const serverStatusLabels = {
+  DRAFT: "Draft",
+  OPEN: "Open",
+  WAITING_FOR_SUPPORT: "Waiting for Support",
+  WAITING_FOR_CUSTOMER: "Waiting for Customer",
+  RESOLVED: "Resolved",
+  REOPENED: "Reopened",
+  CLOSED: "Closed",
+};
+
+function serverStatusTone(statusCode) {
+  return {
+    DRAFT: "draft",
+    OPEN: "open",
+    WAITING_FOR_SUPPORT: "waiting",
+    WAITING_FOR_CUSTOMER: "waiting",
+    RESOLVED: "resolved",
+    REOPENED: "reopened",
+    CLOSED: "resolved",
+  }[statusCode] || "open";
+}
+
+function serverPriorityLabel(value) {
+  if (!value) return null;
+  return String(value).charAt(0).toUpperCase() + String(value).slice(1).toLowerCase();
+}
+
+function issueChoiceForType(value) {
+  return {
+    Incident: "stopped_working",
+    Request: "need_action",
+    Problem: "ongoing_issue",
+    Change: "change_request",
+  }[value] || value || "";
+}
+
+function formatServerDate(value, { detail = false } = {}) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const now = new Date();
+  const seconds = Math.max(0, Math.round((now.getTime() - date.getTime()) / 1000));
+  if (!detail && seconds < 90) return "Just now";
+  if (!detail && seconds < 86_400) {
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    return `${hours} h ago`;
+  }
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: detail ? "numeric" : undefined, hour: detail ? "2-digit" : undefined, minute: detail ? "2-digit" : undefined }).format(date);
+}
+
+function normalizeServerTicket(row) {
+  const statusCode = String(row.status || "OPEN");
+  const statusLabel = serverStatusLabels[statusCode] || row.admin_status || statusCode;
+  const reference = row.reference || (row.id ? `TKT-${String(row.id).padStart(6, "0")}` : "");
+  const previous = Array.isArray(row.previous_predictions) ? row.previous_predictions : [];
+  const firstPrediction = previous[0];
+  return {
+    ...row,
+    backendId: row.id,
+    id: reference,
+    subject: row.subject || "Untitled ticket",
+    createdBy: row.customer || "Customer",
+    customer: row.customer || "Customer",
+    type: row.type || row.issue_type || "",
+    request: row.description || row.request || "",
+    priority: serverPriorityLabel(row.priority),
+    status: [statusLabel, serverStatusTone(statusCode)],
+    statusCode,
+    updated: formatServerDate(row.updated_at),
+    updatedDetail: formatServerDate(row.updated_at, { detail: true }),
+    createdAt: formatServerDate(row.created_at),
+    createdOrder: row.created_at ? new Date(row.created_at).getTime() : 0,
+    updatedOrder: row.updated_at ? new Date(row.updated_at).getTime() : 0,
+    assignee: row.assignee || "Unassigned",
+    queue: row.queue || "",
+    model: row.model_family === "separate" ? "Separate" : "Joint",
+    modelVersion: row.model_version || "",
+    predictedQueue: row.predicted_queue || "",
+    predictedPriority: serverPriorityLabel(row.predicted_priority),
+    routingFailed: Boolean(row.routing_failed),
+    reroutedByStaff: Boolean(row.reroute_requests?.length) || /staff|rerout/i.test(String(row.routing_failure_reason || "")),
+    overdue: Boolean(row.overdue),
+    overdueLabel: row.overdue_label || "",
+    predictionConfidence: row.queue_confidence_percent != null || row.priority_confidence_percent != null
+      ? { queue: row.queue_confidence_percent, priority: row.priority_confidence_percent }
+      : null,
+    originalPrediction: firstPrediction
+      ? { queue: firstPrediction.queue, priority: serverPriorityLabel(firstPrediction.priority) }
+      : null,
+    previousPredictions: previous,
+    closureReason: row.force_close_reason || "",
+    forceCloseReason: row.force_close_reason || "",
+    closedAt: formatServerDate(row.closed_at, { detail: true }),
+    customerReviewUntil: formatServerDate(row.customer_review_until, { detail: true }),
+    resolutionSource: row.resolution_source || "",
+  };
+}
+
+function mergeServerDetail(detail) {
+  const mapped = normalizeServerTicket(detail);
+  mapped.messages = Array.isArray(detail.messages) ? detail.messages : [];
+  mapped.predictions = Array.isArray(detail.predictions) ? detail.predictions : [];
+  mapped.rerouteRequests = Array.isArray(detail.reroute_requests) ? detail.reroute_requests : [];
+  mapped.reroutedByStaff = mapped.rerouteRequests.length > 0 || mapped.reroutedByStaff;
+  state.ticketDetails.set(mapped.id, mapped);
+  getTicketRecords(mapped.id).forEach((ticket) => Object.assign(ticket, mapped));
+  return mapped;
+}
+
+function mapServerSummaryRows(rows) {
+  return (rows || []).map(normalizeServerTicket);
+}
+
+async function refreshServerData({ renderAfter = true } = {}) {
+  if (!serverSessionIsActive()) return;
+  state.serverLoading = true;
+  state.serverError = "";
+  try {
+    if (state.role === "customer") {
+      const dashboard = await serverRequest(serverUrl("/api/reporting/customer/dashboard/", {
+        page: state.customerTicketsPage,
+        page_size: TICKET_TABLE_PAGE_SIZE,
+      }));
+      state.serverData.customer = dashboard;
+      replaceCollection(customerTickets, mapServerSummaryRows(dashboard.tickets));
+      replaceCollection(customerPreviewTickets, mapServerSummaryRows(dashboard.preview_tickets));
+      replaceCollection(customerReplyPreviewTickets, mapServerSummaryRows(dashboard.reply_preview));
+      replaceCollection(customerDrafts, mapServerSummaryRows(dashboard.drafts).map((draft) => ({ ...draft, issueChoice: issueChoiceForType(draft.type || draft.issue_type), body: draft.request || "" })));
+      state.customerTicketsPage = Number(dashboard.tickets_pagination?.page || state.customerTicketsPage || 1);
+      if (state.customerTicketDialog && !customerTickets.some((ticket) => ticket.id === state.customerTicketDialog)) {
+        state.customerTicketDialog = null;
+      }
+    } else if (state.role === "staff") {
+      const [dashboard, performance] = await Promise.all([
+        serverRequest(serverUrl("/api/reporting/staff/dashboard/", {
+          pool_page: state.staffTicketPoolPage,
+          my_page: state.staffMyTicketsPage,
+          page_size: TICKET_TABLE_PAGE_SIZE,
+          pool_priority: state.ticketPoolFilters.priority,
+          pool_type: state.ticketPoolFilters.type,
+          pool_search: "",
+          pool_sort: state.ticketPoolSort.key === "ticketId" ? "ticketId" : state.ticketPoolSort.key,
+          pool_direction: state.ticketPoolSort.direction,
+          my_priority: state.myTicketsFilters.priority,
+          my_status: state.myTicketsFilters.status,
+          my_search: state.myTicketsSearch,
+          my_sort: state.myTicketsSort.key === "ticketId" ? "ticketId" : state.myTicketsSort.key,
+          my_direction: state.myTicketsSort.direction,
+          resolved_period: state.staffResolvedPeriod,
+        })),
+        serverRequest(`/api/reporting/staff/performance/?page=${state.staffPerformancePage || 1}&period=${encodeURIComponent(state.staffPerformancePeriod || "week")}`),
+      ]);
+      state.serverData.staff = dashboard;
+      state.serverData.staffPerformance = performance;
+      replaceCollection(staffAssignedTickets, mapServerSummaryRows(dashboard.tickets));
+      replaceCollection(staffPreviewTickets, mapServerSummaryRows(dashboard.preview_tickets));
+      replaceCollection(ticketPoolTickets, mapServerSummaryRows(dashboard.ticket_pool));
+      state.staffTicketPoolPage = Number(dashboard.ticket_pool_pagination?.page || state.staffTicketPoolPage || 1);
+      state.staffMyTicketsPage = Number(dashboard.tickets_pagination?.page || state.staffMyTicketsPage || 1);
+      roleDefinitions.staff.title = dashboard.staff?.queue || roleDefinitions.staff.title;
+    } else if (state.role === "admin") {
+      const [overview, management, queuesStaff, audit, deployments] = await Promise.all([
+        serverRequest(serverUrl("/api/reporting/admin/overview/", {
+          period: state.adminOverviewPeriod,
+          overdue_period: state.adminOverduePeriod,
+          attention_page: 1,
+          page_size: TICKET_TABLE_PREVIEW_SIZE,
+        })),
+        serverRequest(serverUrl("/api/reporting/admin/ticket-management/", {
+          page: state.adminAllTicketsPage,
+          attention_page: state.adminAttentionPage,
+          page_size: TICKET_TABLE_PAGE_SIZE,
+          search: state.adminTicketSearch,
+          model: state.adminTicketFilters.model,
+          type: state.adminTicketFilters.type,
+          queue: state.adminTicketFilters.queue,
+          priority: state.adminTicketFilters.priority,
+          status: state.adminTicketFilters.status,
+          assignee: state.adminTicketFilters.assignee,
+          sort: state.adminTicketSort.key,
+          direction: state.adminTicketSort.direction,
+        })),
+        serverRequest(serverUrl("/api/accounts/queues-staff/", {
+          period: state.queueDashboardPeriod || "month",
+          queue_id: state.staffQueueFilter !== "all"
+            ? state.serverData.queuesStaff?.queues?.find((queue) => queue.name === state.staffQueueFilter)?.id
+            : undefined,
+        })),
+        serverRequest(serverUrl("/api/audit/activity/", { q: state.auditQuery, category: state.auditCategory })),
+        serverRequest("/api/model/deployments/"),
+      ]);
+      state.serverData.adminOverview = overview;
+      state.serverData.adminOverdueOverview = overview;
+      state.serverData.adminManagement = management;
+      state.serverData.queuesStaff = queuesStaff;
+      state.serverData.audit = audit;
+      state.serverData.deployments = deployments;
+      if (deployments.active_family === "joint" || deployments.active_family === "separate") state.activeModel = deployments.active_family;
+      replaceCollection(adminTickets, mapServerSummaryRows(management.all_tickets));
+      const attentionRows = [...mapServerSummaryRows(management.attention), ...mapServerSummaryRows(overview.tickets_requiring_attention)];
+      const uniqueAttentionRows = [...new Map(attentionRows.map((ticket) => [ticket.id, ticket])).values()];
+      replaceCollection(serverAdminAttentionTickets, uniqueAttentionRows);
+      state.adminAllTicketsPage = Number(management.all_pagination?.page || state.adminAllTicketsPage || 1);
+      state.adminAttentionPage = Number(management.attention_pagination?.page || state.adminAttentionPage || 1);
+      replaceCollection(staffUsers, (queuesStaff.staff || []).map(normalizeServerStaffUser));
+      // Keep assignment choices independent from the selected directory
+      // queue. The endpoint returns all active staff in assignment_staff.
+      if (Array.isArray(queuesStaff.assignment_staff)) {
+        replaceCollection(assignmentStaffUsers, queuesStaff.assignment_staff.map(normalizeServerStaffUser));
+      }
+      replaceCollection(adminActivityEvents, (audit.events || []).slice(0, 5).map((event) => ({
+        tone: event.category === "ROUTING" ? "signal" : event.category === "ACCESS" ? "gold" : "",
+        category: event.category,
+        title: event.action,
+        detail: typeof event.detail === "object" ? JSON.stringify(event.detail) : String(event.detail || ""),
+        actor: event.actor,
+        time: formatServerDate(event.timestamp),
+      })));
+      replaceCollection(auditLogRecords, (audit.events || []).map((event) => ({
+        timestamp: formatServerDate(event.timestamp, { detail: true }),
+        actor: event.actor,
+        category: event.category,
+        action: event.action,
+        record: event.record,
+        detail: typeof event.detail === "object" ? JSON.stringify(event.detail) : String(event.detail || ""),
+      })));
+    }
+    state.serverLoading = false;
+    if (renderAfter) render({ skipPageAnimation: true });
+  } catch (error) {
+    state.serverLoading = false;
+    state.serverError = error.message || "Unable to load the support workspace.";
+    showToast(state.serverError);
+    if (renderAfter) render({ skipPageAnimation: true });
+  }
+}
+
+async function refreshServerModelOperational(family = state.modelDashboard, period = state.modelOperationalPeriod) {
+  if (!serverSessionIsActive() || !family) return;
+  try {
+    const data = await serverRequest(serverUrl(`/api/model/deployments/${encodeURIComponent(family)}/operational/`, { period }));
+    state.serverData.modelOperational = data;
+    render({ skipPageAnimation: true });
+  } catch (error) {
+    showToast(error.message || "Unable to load model operational data.");
+  }
+}
+
+async function refreshServerTicketDetail(ticketId, role) {
+  if (!serverSessionIsActive()) return null;
+  const loadingKey = `${role}:${ticketId}`;
+  if (state.ticketDetailLoading.has(loadingKey)) return null;
+  state.ticketDetailLoading.add(loadingKey);
+  const ticket = state.ticketDetails.get(ticketId) || getTicketRecords(ticketId).find(Boolean);
+  const backendId = ticket?.backendId || ticketId;
+  try {
+    const detail = await serverRequest(`/api/tickets/${encodeURIComponent(backendId)}/`);
+    const mapped = mergeServerDetail(detail);
+    if (role === "customer") state.customerTicketDialog = mapped.id;
+    if (role === "staff") state.staffTicketDialog = mapped.id;
+    if (role === "admin") state.adminTicketDialog = mapped.id;
+    render({ skipPageAnimation: true });
+    return mapped;
+  } catch (error) {
+    if (role === "customer" && error.status === 404) {
+      state.ticketDetails.delete(ticketId);
+      state.customerTicketDialog = null;
+      await refreshServerData({ renderAfter: false });
+      render({ skipPageAnimation: true });
+      showToast("This ticket is closed and is no longer available.");
+      return null;
+    }
+    showToast(error.message || "Unable to load ticket details.");
+    return null;
+  } finally {
+    state.ticketDetailLoading.delete(loadingKey);
+  }
+}
+
+function startServerSession(session) {
+  const role = String(session.role || "customer").toLowerCase();
+  if (!roleDefinitions[role]) return showLoginScreen();
+
+  const profile = {
+    id: session.id,
+    firstName: String(session.firstName || "").trim(),
+    lastName: String(session.lastName || "").trim(),
+    email: String(session.email || "").trim(),
+    phone: String(session.phone || "").trim(),
+  };
+  accountProfiles[role] = profile;
+  state.serverBacked = true;
+  roleDefinitions[role] = {
+    ...roleDefinitions[role],
+    name: getProfileDisplayName(profile) || roleDefinitions[role].name,
+    title: String(session.title || roleDefinitions[role].title),
+  };
+  state.authenticated = true;
+  loginScreen.hidden = true;
+  appShell.hidden = false;
+  // A Django session has one real role.  The prototype's role switcher stays
+  // available only when index.html is opened directly for design review.
+  document.querySelector(".role-picker")?.setAttribute("hidden", "");
+  setRole(role);
+  void refreshServerData();
+}
+
+function logOutOfServerSession() {
+  const session = getServerSession();
+  if (!session?.logoutUrl || !session.csrfToken) {
+    showLoginScreen();
+    return;
+  }
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = session.logoutUrl;
+  const token = document.createElement("input");
+  token.type = "hidden";
+  token.name = "csrfmiddlewaretoken";
+  token.value = session.csrfToken;
+  form.appendChild(token);
+  document.body.appendChild(form);
+  form.submit();
+}
 
 function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
-  window.setTimeout(() => toast.classList.remove("show"), 3200);
+  window.ticketMotion?.enterToast(toast);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    window.ticketMotion?.leaveToast(toast);
+    toast.classList.remove("show");
+  }, 3200);
 }
 
 function renderAccountMenu() {
   accountMenu.hidden = !state.accountMenuOpen;
   accountMenuTrigger.setAttribute("aria-expanded", String(state.accountMenuOpen));
+  if (state.accountMenuOpen) window.ticketMotion?.animateAccountMenu(accountMenu, true);
 }
 
 function getActiveProfile() {
@@ -340,11 +902,115 @@ function getProfileDisplayName(profile) {
   return [profile.firstName, profile.lastName].filter(Boolean).join(" ");
 }
 
+function normalizeServerStaffUser(person) {
+  return {
+    ...person,
+    id: String(person.id),
+    firstName: person.first_name ?? person.firstName ?? "",
+    lastName: person.last_name ?? person.lastName ?? "",
+    title: person.title || "Support specialist",
+    status: person.active === false ? "Inactive" : (person.status || "Available"),
+    activeTickets: Number(person.active_tickets || 0),
+    waitingReply: Number(person.waiting_for_reply || 0),
+    resolved: {
+      today: { count: Number(person.resolved || 0), sla: "—", time: "—" },
+      week: { count: Number(person.resolved || 0), sla: "—", time: "—" },
+      month: { count: Number(person.resolved || 0), sla: "—", time: "—" },
+    },
+  };
+}
+
+function getAssignmentStaffNames(queueName) {
+  if (!queueName) return [];
+  const source = serverSessionIsActive() ? assignmentStaffUsers : staffUsers;
+  return [...new Set(source
+    .filter((user) => user.queue === queueName && getProfileDisplayName(user))
+    .map((user) => getProfileDisplayName(user)))];
+}
+
+function renderAdminAssigneeOptions(queueName, selectedName = "") {
+  const names = ["Unassigned", ...getAssignmentStaffNames(queueName)];
+  // Keep the local prototype's team labels visible for its static fixture
+  // tickets. Server-backed tickets are always constrained to real staff
+  // returned by the selected queue's active assignments.
+  if (!serverSessionIsActive() && selectedName && !names.includes(selectedName)) names.push(selectedName);
+  return names.map((assignee) => `<option value="${escapeHtml(assignee)}" ${selectedName === assignee ? "selected" : ""}>${escapeHtml(assignee)}</option>`).join("");
+}
+
 function getAvailableTicketPoolTickets() {
-  return ticketPoolTickets.filter((ticket) => !state.claimedTicketAssignments.has(ticket.id));
+  return ticketPoolTickets.filter((ticket) => (
+    !state.claimedTicketAssignments.has(ticket.id)
+    && !state.staffReroutedTicketIds.has(ticket.id)
+    && !state.forceClosedTickets.has(ticket.id)
+    && !state.systemClosedTickets.has(ticket.id)
+    && ticket.status?.[0] !== "Closed"
+  ));
+}
+
+function getTicketRecords(ticketId) {
+  return [customerTickets, customerPreviewTickets, customerReplyPreviewTickets, staffAssignedTickets, ticketPoolTickets, adminTickets, serverAdminAttentionTickets]
+    .map((tickets) => tickets.find((ticket) => ticket.id === ticketId))
+    .filter(Boolean);
+}
+
+function setTicketStatus(ticketId, label, tone, updates = {}) {
+  getTicketRecords(ticketId).forEach((ticket) => {
+    Object.assign(ticket, { status: [label, tone], ...updates });
+  });
+}
+
+function markTicketResolved(ticketId, { automatic = false } = {}) {
+  if (state.forceClosedTickets.has(ticketId) || state.systemClosedTickets.has(ticketId)) return;
+  const waitingSince = state.waitingForCustomerSince.get(ticketId);
+  const resolvedAt = automatic && waitingSince
+    ? new Date(new Date(waitingSince).getTime() + CUSTOMER_REPLY_WINDOW_MS)
+    : PROTOTYPE_TODAY;
+  state.pendingClosureTicketIds.add(ticketId);
+  state.customerResolutionDates.set(ticketId, resolvedAt.toISOString());
+  state.waitingForCustomerSince.delete(ticketId);
+  if (automatic) state.automaticallyResolvedTicketIds.add(ticketId);
+  else state.automaticallyResolvedTicketIds.delete(ticketId);
+  setTicketStatus(ticketId, "Resolved", "resolved", {
+    updated: automatic ? "Resolved automatically" : "Resolved by customer",
+    updatedDetail: automatic ? "Automatically resolved after one day" : "Resolved by customer",
+  });
+}
+
+function syncTicketLifecycle() {
+  state.waitingForCustomerSince.forEach((waitingSince, ticketId) => {
+    if (PROTOTYPE_TODAY.getTime() - new Date(waitingSince).getTime() >= CUSTOMER_REPLY_WINDOW_MS) {
+      markTicketResolved(ticketId, { automatic: true });
+    }
+  });
+  state.customerResolutionDates.forEach((resolvedAt, ticketId) => {
+    const closesAt = new Date(resolvedAt);
+    closesAt.setDate(closesAt.getDate() + CUSTOMER_CLOSURE_WINDOW_DAYS);
+    if (closesAt.getTime() > PROTOTYPE_TODAY.getTime() || state.forceClosedTickets.has(ticketId) || state.systemClosedTickets.has(ticketId)) return;
+    const closure = {
+      closedAt: formatClosureDate(closesAt),
+      closedOrder: closesAt.getTime(),
+      reason: "Customer did not reopen the resolved ticket within 3 days.",
+      closedBy: "System",
+    };
+    state.systemClosedTickets.set(ticketId, closure);
+    setTicketStatus(ticketId, "Closed", "resolved", {
+      updated: "Closed automatically",
+      updatedDetail: closure.reason,
+      closedAt: closure.closedAt,
+      closureReason: closure.reason,
+    });
+  });
 }
 
 function getTicketClosureDetails(ticketId) {
+  const forcedClosure = state.forceClosedTickets.get(ticketId);
+  if (forcedClosure) {
+    return { ...forcedClosure, isClosed: true, daysRemaining: 0, forced: true };
+  }
+  const systemClosure = state.systemClosedTickets.get(ticketId);
+  if (systemClosure) {
+    return { ...systemClosure, isClosed: true, daysRemaining: 0, automatic: true };
+  }
   const markedResolvedAt = state.customerResolutionDates.get(ticketId);
   if (!markedResolvedAt) return null;
   const markedAt = new Date(markedResolvedAt);
@@ -370,6 +1036,16 @@ function getClosureCountdownLabel(closure) {
 
 function getStaffTicketRecord(ticket) {
   const closure = getTicketClosureDetails(ticket.id);
+  if (closure?.forced) {
+    return {
+      ...ticket,
+      status: ["Closed", "resolved"],
+      closure,
+      closedAt: closure.closedAt,
+      closedOrder: closure.closedOrder,
+      resolvedIn: "Force closed by administrator",
+    };
+  }
   if (!closure) return { ...ticket, closure: null };
   if (closure.isClosed) {
     return {
@@ -381,38 +1057,43 @@ function getStaffTicketRecord(ticket) {
       resolvedIn: ticket.resolvedIn || "3 days",
     };
   }
-  return { ...ticket, status: ["Customer resolved", "pending-close"], closure };
+  return { ...ticket, status: ["Resolved", "resolved"], closure };
 }
 
 function getClaimedStaffTickets() {
   return ticketPoolTickets
     .filter((ticket) => state.claimedTicketAssignments.get(ticket.id) === getActiveProfile().id)
-    .map((ticket) => getStaffTicketRecord({ ...ticket, status: ["Open", "open"], updated: "Just claimed", updatedOrder: 0 }));
+    .map((ticket) => getStaffTicketRecord({ ...ticket, status: ["Waiting for Support", "waiting"], updated: "Just claimed", updatedOrder: 0 }));
 }
 
 function getStaffWorkTickets() {
-  return [...getClaimedStaffTickets(), ...staffAssignedTickets.map((ticket) => getStaffTicketRecord(ticket))];
+  return [...getClaimedStaffTickets(), ...staffAssignedTickets.map((ticket) => getStaffTicketRecord(ticket))]
+    .filter((ticket) => !state.staffReroutedTicketIds.has(ticket.id));
 }
 
 function getStaffActiveTickets() {
-  return getStaffWorkTickets().filter((ticket) => !ticket.closure?.isClosed);
-}
-
-function getClosedStaffTickets() {
-  const automaticallyClosed = getStaffWorkTickets().filter((ticket) => ticket.closure?.isClosed);
-  const automaticIds = new Set(automaticallyClosed.map((ticket) => ticket.id));
-  return [...automaticallyClosed, ...staffClosedTicketHistory.filter((ticket) => !automaticIds.has(ticket.id))]
-    .sort((left, right) => (right.closedOrder || 0) - (left.closedOrder || 0));
+  return getStaffWorkTickets().filter((ticket) => ticket.status[0] !== "Closed" && !ticket.closure?.isClosed);
 }
 
 function getClaimedTicketCountForStaff(staffId) {
   return ticketPoolTickets.filter((ticket) => (
-    state.claimedTicketAssignments.get(ticket.id) === staffId && !getTicketClosureDetails(ticket.id)?.isClosed
+    state.claimedTicketAssignments.get(ticket.id) === staffId
+    && !getTicketClosureDetails(ticket.id)?.isClosed
   )).length;
 }
 
 function getStaffPendingReplyCount() {
-  return getStaffActiveTickets().filter((ticket) => ticket.status[0] === "Reply needed").length;
+  return getStaffActiveTickets().filter((ticket) => ["Waiting for Support", "Reopened"].includes(ticket.status[0])).length;
+}
+
+function getFilteredStaffMyTickets() {
+  const search = state.myTicketsSearch.trim().toLowerCase();
+  return getStaffActiveTickets().filter((ticket) => {
+    const searchable = [ticket.id, ticket.subject, ticket.request, ticket.createdBy, ticket.type, ticket.priority, ticket.status?.[0], ticket.queue, ticket.assignee, ticket.updated].filter(Boolean).join(" ").toLowerCase();
+    return (state.myTicketsFilters.priority === "all" || ticket.priority === state.myTicketsFilters.priority)
+      && (state.myTicketsFilters.status === "all" || ticket.status?.[0] === state.myTicketsFilters.status)
+      && (!search || searchable.includes(search));
+  });
 }
 
 function getAssignedStaffName(staffId) {
@@ -422,7 +1103,47 @@ function getAssignedStaffName(staffId) {
 
 function getStaffTicket(ticketId) {
   return getStaffActiveTickets().find((ticket) => ticket.id === ticketId)
-    || getClosedStaffTickets().find((ticket) => ticket.id === ticketId);
+    || staffPreviewTickets.find((ticket) => ticket.id === ticketId)
+    || state.ticketDetails.get(ticketId);
+}
+
+function rerouteStaffTicketToAdmin(ticketId) {
+  const ticket = getStaffTicket(ticketId);
+  if (!ticket) {
+    showToast("That ticket is no longer available in your desk.");
+    return;
+  }
+  const staffName = getProfileDisplayName(getActiveProfile());
+  const conversation = staffTicketConversations[ticket.id];
+  const routingRecord = {
+    id: ticket.id,
+    subject: ticket.subject,
+    customer: ticket.createdBy,
+    type: ticket.type,
+    request: conversation?.customerMessage || `The customer needs help with: ${ticket.subject}.`,
+    priority: ticket.priority,
+    model: state.activeModel === "joint" ? "Joint" : "Separate",
+    originalPrediction: {
+      queue: roleDefinitions.staff.title,
+      priority: ticket.priority,
+    },
+    predictionConfidence: { queue: 71, priority: 84 },
+    queue: "",
+    assignee: "Unassigned",
+    status: ["Open", "open"],
+    updated: `Sent by ${staffName}`,
+    routingFailed: true,
+    reopened: false,
+    reroutedByStaff: true,
+  };
+  const existingRecord = getAdminTicket(ticket.id);
+  if (existingRecord) Object.assign(existingRecord, routingRecord);
+  else adminTickets.unshift(routingRecord);
+  state.staffReroutedTicketIds.add(ticket.id);
+  state.claimedTicketAssignments.delete(ticket.id);
+  adminActivityEvents.unshift({ tone: "signal", category: "Routing", title: "Staff sent a ticket for manual rerouting", detail: `${ticket.id} was returned by ${staffName} because it does not belong to the current queue.`, actor: staffName, time: "JUST NOW" });
+  auditLogRecords.unshift({ timestamp: "19 Aug 2026, 12:04", actor: staffName, category: "Routing", action: "Sent ticket for manual rerouting", record: ticket.id, detail: "Staff determined that the ticket does not belong to their assigned queue." });
+  closeActiveDialog("staffTicketDialog", () => showToast(`${ticket.id} was sent to Admin Ticket management for manual rerouting.`));
 }
 
 function renderStaffTicketStatus(ticket) {
@@ -482,6 +1203,15 @@ function passwordRequirementError(password) {
 }
 
 function getStaffResolvedPeriod() {
+  if (serverSessionIsActive() && state.serverData.staff?.resolved_period === state.staffResolvedPeriod) {
+    const labels = { today: "Today", week: "This week", month: "This month" };
+    return {
+      key: state.staffResolvedPeriod,
+      label: labels[state.staffResolvedPeriod] || state.staffResolvedPeriod,
+      value: String(Number(state.serverData.staff.resolved_period_count || 0)),
+      detail: " resolved in selected period",
+    };
+  }
   return staffResolvedPeriods.find((period) => period.key === state.staffResolvedPeriod) || staffResolvedPeriods[0];
 }
 
@@ -498,6 +1228,20 @@ function openAccountPage(page) {
   render();
 }
 
+function closeActiveDialog(dialogStateKey, afterClose) {
+  const finish = () => {
+    state[dialogStateKey] = null;
+    if (dialogStateKey === "staffUserDialog") state.staffDeleteConfirmId = null;
+    render({ skipPageAnimation: true });
+    afterClose?.();
+  };
+  if (main.querySelector(".ticket-dialog-backdrop") && window.ticketMotion?.animateDialogExit) {
+    window.ticketMotion.animateDialogExit(main, finish);
+    return;
+  }
+  finish();
+}
+
 function renderNavigation() {
   const definition = roleDefinitions[state.role];
   const staffId = state.role === "staff" ? getActiveProfile().id : null;
@@ -509,11 +1253,11 @@ function renderNavigation() {
     const warm = page === "unassigned" || (page === "tickets" && state.role !== "customer") ? " warm" : "";
     const badgeClass = isStaffReplyAction ? " action" : warm;
     const displayedBadge = state.role === "staff" && page === "dashboard"
-      ? getStaffPendingReplyCount()
+      ? (serverSessionIsActive() && state.serverData.staff ? Number(state.serverData.staff.metrics?.waiting_for_reply || 0) : getStaffPendingReplyCount())
       : state.role === "staff" && page === "unassigned"
-        ? getAvailableTicketPoolTickets().length
+        ? (serverSessionIsActive() && state.serverData.staff ? Number(state.serverData.staff.ticket_pool_pagination?.total || 0) : getAvailableTicketPoolTickets().length)
         : state.role === "staff" && page === "assigned"
-          ? staffAssignedTickets.length + claimedTicketCount
+          ? (serverSessionIsActive() && state.serverData.staff ? Number(state.serverData.staff.metrics?.active_tickets || 0) : staffAssignedTickets.length + claimedTicketCount)
           : badge;
     const badgeTitle = isStaffReplyAction
       ? `${displayedBadge} ticket${displayedBadge === 1 ? "" : "s"} waiting for your reply`
@@ -548,7 +1292,10 @@ function setRole(role) {
   state.staffTicketDialog = null;
   state.adminTicketDialog = null;
   state.activeDraftId = null;
+  state.emptyDraftPrompt = false;
   state.accountMenuOpen = false;
+  lastRenderPageKey = "";
+  lastRenderDialogKey = "";
   document.querySelectorAll(".role-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.role === role);
   });
@@ -556,7 +1303,25 @@ function setRole(role) {
   render();
 }
 
-function render() {
+function getRenderPageKey() {
+  return [state.role, state.page, state.modelDashboard || ""].join(":");
+}
+
+function getRenderDialogKey() {
+  return [
+    state.customerTicketDialog ? `customer:${state.customerTicketDialog}` : "",
+    state.staffTicketDialog ? `staff:${state.staffTicketDialog}` : "",
+    state.adminTicketDialog ? `admin:${state.adminTicketDialog}` : "",
+    state.staffUserDialog ? `staff-user:${state.staffUserDialog}` : "",
+  ].filter(Boolean).join("|");
+}
+
+function render(options = {}) {
+  syncTicketLifecycle();
+  const pageKey = getRenderPageKey();
+  const dialogKey = getRenderDialogKey();
+  const pageChanged = pageKey !== lastRenderPageKey;
+  const dialogChanged = dialogKey !== lastRenderDialogKey;
   renderNavigation();
   updateAccountIdentity();
   const isCustomer = state.role === "customer";
@@ -566,13 +1331,19 @@ function render() {
     ? ""
     : isStaff
       ? `${getProfileDisplayName(getActiveProfile())} · ${roleDefinitions.staff.title}`
-      : `${state.role.charAt(0).toUpperCase() + state.role.slice(1)} / ${pageTitle()}`;
+      : `${getProfileDisplayName(getActiveProfile())} · ${roleDefinitions.admin.title}`;
   const routingRail = document.querySelector(".routing-rail");
   routingRail.hidden = isCustomer;
   document.querySelector(".topbar").classList.toggle("customer-topbar", isCustomer);
   renderAccountMenu();
   main.innerHTML = renderPage();
   main.focus({ preventScroll: true });
+  const skipPageAnimation = options.skipPageAnimation || Boolean(dialogKey);
+  if (pageChanged && !skipPageAnimation) window.ticketMotion?.animatePage(main);
+  else window.ticketMotion?.animatePage(main, { skip: true });
+  if (dialogChanged && dialogKey) window.ticketMotion?.animateDialog(main);
+  lastRenderPageKey = pageKey;
+  lastRenderDialogKey = dialogKey;
 }
 
 function renderPage() {
@@ -598,29 +1369,102 @@ function renderChangePassword() {
 }
 
 function status(label, tone) { return `<span class="status ${tone}">${label}</span>`; }
-function priority(label) { return `<span class="priority ${label.toLowerCase()}">${label}</span>`; }
+function priority(label) { return label ? `<span class="priority ${String(label).toLowerCase()}">${escapeHtml(label)}</span>` : "—"; }
 
 function getCustomerDrafts() {
   return customerDrafts.filter((draft) => !state.discardedDraftIds.has(draft.id));
 }
 
+function getTicketFormValues(form) {
+  const formData = new FormData(form);
+  return {
+    subject: String(formData.get("subject") || "").trim(),
+    body: String(formData.get("description") || "").trim(),
+    issueChoice: String(formData.get("issue-choice") || "").trim(),
+  };
+}
+
+function issueTypeForChoice(value) {
+  return {
+    stopped_working: "Incident",
+    need_action: "Request",
+    ongoing_issue: "Problem",
+    change_request: "Change",
+  }[value] || value || "";
+}
+
+async function saveCustomerDraft(form) {
+  if (state.customerActionPending) return;
+  setCustomerTicketActionPending(form, true, "save");
+  const values = getTicketFormValues(form);
+  if (serverSessionIsActive()) {
+    const draft = customerDrafts.find((item) => item.id === state.activeDraftId);
+    const requestKey = ensureCustomerFormRequestKey();
+    const path = draft?.backendId
+      ? `/api/tickets/customer/drafts/${encodeURIComponent(draft.backendId)}/`
+      : "/api/tickets/customer/drafts/";
+    try {
+      await serverRequest(path, {
+        method: "POST",
+        idempotencyKey: requestKey,
+        body: { subject: values.subject, description: values.body, issue_type: issueTypeForChoice(values.issueChoice) },
+      });
+      state.activeDraftId = null;
+      state.customerFormRequestKey = "";
+      state.emptyDraftPrompt = false;
+      state.page = "tickets";
+      await refreshServerData({ renderAfter: false });
+      render();
+      showToast(draft ? "Draft changes saved. It has not been sent for routing." : "Draft saved. It now appears at the top of My tickets.");
+    } catch (error) {
+      showToast(error.message || "Unable to save the draft.");
+    } finally {
+      setCustomerTicketActionPending(form, false);
+    }
+    return;
+  }
+  const wasEditing = Boolean(state.activeDraftId);
+  const draftId = state.activeDraftId || `DRAFT-${String(customerDrafts.length + 1).padStart(2, "0")}`;
+  const existingDraft = customerDrafts.find((draft) => draft.id === draftId);
+  const draft = existingDraft || { id: draftId };
+  Object.assign(draft, {
+    subject: values.subject || "Untitled draft",
+    body: values.body,
+    issueChoice: values.issueChoice,
+    updated: "Just now",
+  });
+  if (!existingDraft) customerDrafts.unshift(draft);
+  state.activeDraftId = null;
+  state.customerFormRequestKey = "";
+  state.emptyDraftPrompt = false;
+  state.page = "tickets";
+  render();
+  showToast(wasEditing ? "Draft changes saved. It has not been sent for routing." : "Draft saved. It now appears at the top of My tickets.");
+  setCustomerTicketActionPending(form, false);
+}
+
 function getCustomerTicketStatus(ticket) {
-  return state.pendingClosureTicketIds.has(ticket.id)
-    ? ["Pending closure", "pending-close"]
+  return state.forceClosedTickets.has(ticket.id) || state.systemClosedTickets.has(ticket.id) || ticket.status[0] === "Closed"
+    ? ["Closed", "resolved"]
+    : state.pendingClosureTicketIds.has(ticket.id)
+    ? ["Resolved", "resolved"]
     : ticket.status;
 }
 
 function getCustomerActiveTickets() {
-  return customerTickets.filter((ticket) => ticket.status[1] !== "resolved" && !state.pendingClosureTicketIds.has(ticket.id));
+  return customerTickets.filter((ticket) => (
+    getCustomerTicketStatus(ticket)[0] !== "Closed"
+  ));
 }
 
 function getCustomerReplyCount() {
-  return getCustomerActiveTickets().filter((ticket) => ticket.status[1] === "waiting").length;
+  return getCustomerActiveTickets().filter((ticket) => getCustomerTicketStatus(ticket)[0] === "Waiting for Customer").length;
 }
 
 function renderCustomerTicketBadges() {
-  const replyCount = getCustomerReplyCount();
-  const draftCount = getCustomerDrafts().length;
+  const serverCustomer = state.serverData.customer;
+  const replyCount = serverSessionIsActive() && serverCustomer ? Number(serverCustomer.reply_needed_count || 0) : getCustomerReplyCount();
+  const draftCount = serverSessionIsActive() && serverCustomer ? Number(serverCustomer.draft_count || 0) : getCustomerDrafts().length;
   const labels = [];
   if (replyCount) labels.push(`${replyCount} ticket${replyCount === 1 ? "" : "s"} need your reply`);
   if (draftCount) labels.push(`${draftCount} draft${draftCount === 1 ? "" : "s"}`);
@@ -628,14 +1472,52 @@ function renderCustomerTicketBadges() {
   return `<span class="nav-badges" aria-label="${labels.join(", ")}">${replyCount ? `<span class="nav-badge warm" title="Tickets needing your reply">${replyCount}</span>` : ""}${draftCount ? `<span class="nav-badge" title="Private drafts">${draftCount}</span>` : ""}</span>`;
 }
 
-function openCustomerTicket(ticketId) {
+async function openCustomerTicket(ticketId) {
+  if (serverSessionIsActive()) {
+    const ticket = customerTickets.find((item) => item.id === ticketId) || customerPreviewTickets.find((item) => item.id === ticketId) || customerReplyPreviewTickets.find((item) => item.id === ticketId);
+    if (!ticket || ticket.statusCode === "CLOSED") {
+      showToast("Closed tickets are available for administrator review only.");
+      return;
+    }
+    state.page = "tickets";
+    state.activeDraftId = null;
+    state.customerTicketDialog = ticketId;
+    render({ skipPageAnimation: true });
+    await refreshServerTicketDetail(ticketId, "customer");
+    return;
+  }
+  const ticket = customerTickets.find((item) => item.id === ticketId);
+  if (!ticket || getCustomerTicketStatus(ticket)[0] === "Closed") {
+    showToast("Closed tickets are available for administrator review only.");
+    return;
+  }
   state.page = "tickets";
   state.activeDraftId = null;
   state.customerTicketDialog = ticketId;
   render();
 }
 
-function openStaffTicket(ticketId) {
+async function openStaffTicket(ticketId) {
+  if (serverSessionIsActive()) {
+    let staffTicket = getStaffTicket(ticketId);
+    if (!staffTicket) {
+      const historical = (state.serverData.staffPerformance?.recent_resolved_work || []).find((row) => row.reference === ticketId || String(row.id) === ticketId);
+      if (historical) {
+        staffTicket = normalizeServerTicket(historical);
+        state.ticketDetails.set(staffTicket.id, staffTicket);
+      }
+    }
+    if (!staffTicket) {
+      showToast("That ticket is no longer assigned to your desk.");
+      return;
+    }
+    state.page = "assigned";
+    state.customerTicketDialog = null;
+    state.staffTicketDialog = ticketId;
+    render({ skipPageAnimation: true });
+    await refreshServerTicketDetail(ticketId, "staff");
+    return;
+  }
   if (!getStaffTicket(ticketId)) {
     showToast("That ticket is no longer assigned to your desk.");
     return;
@@ -646,28 +1528,429 @@ function openStaffTicket(ticketId) {
   render();
 }
 
-function openClosedStaffTicket(ticketId) {
-  if (!getClosedStaffTickets().some((ticket) => ticket.id === ticketId)) {
-    showToast("That closed ticket is no longer available for review.");
-    return;
+function backendTicketId(ticketId) {
+  const ticket = state.ticketDetails.get(ticketId) || getTicketRecords(ticketId).find(Boolean);
+  return ticket?.backendId || ticketId;
+}
+
+async function discardCustomerDraft(draftId) {
+  if (!serverSessionIsActive()) return false;
+  const draft = customerDrafts.find((item) => item.id === draftId);
+  if (!draft?.backendId) return false;
+  const key = `draft:${draftId}`;
+  const scope = findTicketActionButton("discard-draft", draftId);
+  if (!beginPendingAction(key, scope, "Discarding…")) return false;
+  try {
+    await serverRequest(`/api/tickets/customer/drafts/${encodeURIComponent(draft.backendId)}/discard/`, { method: "DELETE" });
+    await refreshServerData({ renderAfter: false });
+    render();
+    showToast(`${draftId} was discarded.`);
+  } catch (error) {
+    showToast(error.message || "Unable to discard the draft.");
+  } finally {
+    finishPendingAction(key, scope);
   }
-  state.page = "performance";
-  state.customerTicketDialog = null;
-  state.staffTicketDialog = ticketId;
-  render();
+  return true;
+}
+
+async function markCustomerTicketResolved(ticketId) {
+  if (!serverSessionIsActive()) return false;
+  const key = ticketActionKey("customer", ticketId);
+  const scope = document.querySelector(".customer-ticket-dialog");
+  if (!beginPendingAction(key, scope, "Saving…")) return false;
+  try {
+    await serverRequest(`/api/tickets/customer/tickets/${encodeURIComponent(backendTicketId(ticketId))}/resolve/`, { method: "POST" });
+    await refreshServerData({ renderAfter: false });
+    state.customerTicketDialog = null;
+    render();
+    showToast(`${ticketId} will close automatically after three days unless reopened.`);
+  } catch (error) {
+    showToast(error.message || "Unable to mark the ticket resolved.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function reopenCustomerTicket(ticketId) {
+  if (!serverSessionIsActive()) return false;
+  const key = ticketActionKey("customer", ticketId);
+  const scope = document.querySelector(".customer-ticket-dialog");
+  if (!beginPendingAction(key, scope, "Reopening…")) return false;
+  try {
+    await serverRequest(`/api/tickets/customer/tickets/${encodeURIComponent(backendTicketId(ticketId))}/reopen/`, { method: "POST" });
+    await refreshServerData({ renderAfter: false });
+    state.customerTicketDialog = null;
+    render();
+    showToast(`${ticketId} was reopened and returned to the support team.`);
+  } catch (error) {
+    showToast(error.message || "Unable to reopen the ticket.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function claimServerTicket(ticketId) {
+  if (!serverSessionIsActive()) return false;
+  const key = `claim:${ticketId}`;
+  if (!beginPendingAction(key, findTicketActionButton("claim", ticketId), "Claiming…")) return false;
+  try {
+    await serverRequest(`/api/tickets/staff/ticket-pool/${encodeURIComponent(backendTicketId(ticketId))}/claim/`, { method: "POST" });
+    await refreshServerData({ renderAfter: false });
+    render();
+    showToast(`${ticketId} was claimed and moved to My tickets.`);
+  } catch (error) {
+    showToast(error.message || "Unable to claim that ticket.");
+  } finally {
+    finishPendingAction(key, findTicketActionButton("claim", ticketId));
+  }
+  return true;
+}
+
+async function rerouteServerTicket(ticketId) {
+  if (!serverSessionIsActive()) return false;
+  const key = ticketActionKey("staff", ticketId);
+  const scope = document.querySelector(".staff-ticket-dialog");
+  if (!beginPendingAction(key, scope, "Sending…")) return false;
+  try {
+    const reason = window.prompt("Why does this ticket need manual rerouting?")?.trim();
+    if (!reason) return true;
+    await serverRequest(`/api/tickets/staff/tickets/${encodeURIComponent(backendTicketId(ticketId))}/reroute/`, { method: "POST", body: { reason } });
+    await refreshServerData({ renderAfter: false });
+    state.staffTicketDialog = null;
+    render();
+    showToast(`${ticketId} was sent to Admin Ticket management for manual rerouting.`);
+  } catch (error) {
+    showToast(error.message || "Unable to send this ticket for rerouting.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function submitServerCustomerTicket(form) {
+  if (state.customerActionPending) return;
+  setCustomerTicketActionPending(form, true, "submit");
+  const values = getTicketFormValues(form);
+  const draft = customerDrafts.find((item) => item.id === state.activeDraftId);
+  const requestKey = ensureCustomerFormRequestKey();
+  try {
+    let draftId = draft?.backendId;
+    if (!draftId) {
+      const created = await serverRequest("/api/tickets/customer/drafts/", {
+        method: "POST",
+        idempotencyKey: requestKey,
+        body: { subject: values.subject, description: values.body, issue_type: issueTypeForChoice(values.issueChoice) },
+      });
+      draftId = created.id;
+    } else {
+      await serverRequest(`/api/tickets/customer/drafts/${encodeURIComponent(draftId)}/`, {
+        method: "POST",
+        idempotencyKey: requestKey,
+        body: { subject: values.subject, description: values.body, issue_type: issueTypeForChoice(values.issueChoice) },
+      });
+    }
+    await serverRequest(`/api/tickets/customer/tickets/${encodeURIComponent(draftId)}/submit/`, {
+      method: "POST",
+      idempotencyKey: requestKey,
+      body: {},
+    });
+    state.activeDraftId = null;
+    state.customerFormRequestKey = "";
+    state.page = "tickets";
+    await refreshServerData({ renderAfter: false });
+    render();
+    showToast(draft ? "Draft submitted. The routing result will appear in your ticket timeline." : "Ticket submitted. The routing result will appear in your ticket timeline.");
+  } catch (error) {
+    const errorNode = form.querySelector("#ticket-form-error");
+    if (errorNode) {
+      errorNode.textContent = error.message || "Unable to submit the ticket.";
+      errorNode.hidden = false;
+    } else showToast(error.message || "Unable to submit the ticket.");
+  } finally {
+    setCustomerTicketActionPending(form, false);
+  }
+}
+
+async function replyToCustomerTicket(ticketId, body, errorNode, form) {
+  const key = ticketActionKey("customer", ticketId);
+  const scope = form.closest(".ticket-dialog") || form;
+  if (!beginPendingAction(key, scope, "Sending…")) return false;
+  try {
+    await serverRequest(`/api/tickets/customer/tickets/${encodeURIComponent(backendTicketId(ticketId))}/reply/`, { method: "POST", body: { body } });
+    await refreshServerData({ renderAfter: false });
+    state.customerTicketDialog = null;
+    render();
+    showToast("Reply sent. Your ticket is now back with the support team.");
+  } catch (error) {
+    errorNode.textContent = error.message || "Unable to send the reply.";
+    errorNode.hidden = false;
+    form.elements["customer-reply"]?.focus();
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function replyToStaffTicket(ticketId, body, errorNode, form) {
+  const key = ticketActionKey("staff", ticketId);
+  const scope = form.closest(".ticket-dialog") || form;
+  if (!beginPendingAction(key, scope, "Sending…")) return false;
+  try {
+    await serverRequest(`/api/tickets/staff/tickets/${encodeURIComponent(backendTicketId(ticketId))}/reply/`, { method: "POST", body: { body } });
+    await refreshServerData({ renderAfter: false });
+    state.staffTicketDialog = null;
+    render();
+    showToast("Reply sent to the customer.");
+  } catch (error) {
+    errorNode.textContent = error.message || "Unable to send the reply.";
+    errorNode.hidden = false;
+    form.elements["staff-reply"]?.focus();
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function forceCloseServerTicket(ticketId, reason) {
+  if (!serverSessionIsActive()) return false;
+  const key = ticketActionKey("admin", ticketId);
+  const scope = document.querySelector(".admin-ticket-dialog");
+  if (!beginPendingAction(key, scope, "Closing…")) return false;
+  try {
+    await serverRequest(`/api/tickets/admin/tickets/${encodeURIComponent(backendTicketId(ticketId))}/force-close/`, {
+      method: "POST",
+      body: { reason },
+    });
+    await refreshServerData({ renderAfter: false });
+    state.adminTicketDialog = null;
+    render();
+    showToast(`${ticketId} was force closed and moved to the closed ticket archive.`);
+  } catch (error) {
+    showToast(error.message || "Unable to force close this ticket.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+function serverQueueIdForName(queueName) {
+  const queues = state.serverData.queuesStaff?.queues || [];
+  return queues.find((queue) => queue.name === queueName)?.id || null;
+}
+
+function serverStaffIdForName(name) {
+  if (!name || name === "Unassigned") return null;
+  return assignmentStaffUsers.find((user) => getProfileDisplayName(user) === name || user.name === name)?.id || null;
+}
+
+async function routeServerAdminTicket(ticketId, { queueName, assigneeName, priorityValue }) {
+  if (!serverSessionIsActive()) return false;
+  const key = ticketActionKey("admin", ticketId);
+  const scope = document.querySelector(".admin-ticket-dialog");
+  if (!beginPendingAction(key, scope, "Saving…")) return false;
+  const queueId = serverQueueIdForName(queueName);
+  if (!queueId) {
+    showToast("Select a valid support queue before saving.");
+    finishPendingAction(key, scope);
+    return true;
+  }
+  try {
+    await serverRequest(`/api/tickets/admin/tickets/${encodeURIComponent(backendTicketId(ticketId))}/route/`, {
+      method: "POST",
+      body: {
+        queue_id: queueId,
+        assignee_id: serverStaffIdForName(assigneeName),
+        priority: String(priorityValue || "").toLowerCase(),
+      },
+    });
+    await refreshServerData({ renderAfter: false });
+    state.adminTicketDialog = null;
+    render();
+    showToast(`${ticketId} was routed to ${queueName} and assigned to ${assigneeName || "Unassigned"}.`);
+  } catch (error) {
+    showToast(error.message || "Unable to update this ticket route.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function saveServerProfile(form) {
+  if (!serverSessionIsActive()) return false;
+  const key = "account:profile";
+  if (!beginPendingAction(key, form, "Saving…")) return false;
+  const formData = new FormData(form);
+  try {
+    await serverRequest("/profile/", {
+      method: "POST",
+      body: {
+        first_name: String(formData.get("profile-first-name") || "").trim(),
+        last_name: String(formData.get("profile-last-name") || "").trim(),
+        phone: String(formData.get("profile-phone") || "").trim(),
+      },
+    });
+    const session = getServerSession();
+    const nextProfile = {
+      ...getActiveProfile(),
+      firstName: String(formData.get("profile-first-name") || "").trim(),
+      lastName: String(formData.get("profile-last-name") || "").trim(),
+      phone: String(formData.get("profile-phone") || "").trim(),
+    };
+    accountProfiles[state.role] = nextProfile;
+    roleDefinitions[state.role].name = getProfileDisplayName(nextProfile);
+    roleDefinitions[state.role].title = String(session?.title || roleDefinitions[state.role].title);
+    updateAccountIdentity();
+    render();
+    showToast("Profile changes saved.");
+  } catch (error) {
+    showToast(error.message || "Unable to save profile changes.");
+  } finally {
+    finishPendingAction(key, form);
+  }
+  return true;
+}
+
+async function changeServerPassword(form, values, error) {
+  if (!serverSessionIsActive()) return false;
+  const key = "account:password";
+  if (!beginPendingAction(key, form, "Saving…")) return false;
+  try {
+    await serverRequest("/api/accounts/change-password/", {
+      method: "POST",
+      body: {
+        old_password: values.currentPassword,
+        new_password1: values.newPassword,
+        new_password2: values.confirmPassword,
+      },
+    });
+    error.hidden = true;
+    form.reset();
+    showToast("New password saved.");
+  } catch (requestError) {
+    error.textContent = requestError.message || "Unable to change the password.";
+    error.hidden = false;
+  } finally {
+    finishPendingAction(key, form);
+  }
+  return true;
+}
+
+async function saveServerStaffUser(form) {
+  if (!serverSessionIsActive()) return false;
+  const formData = new FormData(form);
+  const userId = form.dataset.staffId;
+  const queueId = serverQueueIdForName(String(formData.get("staff-queue") || ""));
+  const body = {
+    first_name: String(formData.get("staff-first-name") || "").trim(),
+    last_name: String(formData.get("staff-last-name") || "").trim(),
+    phone: String(formData.get("staff-phone") || "").trim(),
+    queue_id: queueId,
+  };
+  if (userId === "new") {
+    body.email = String(formData.get("staff-email") || "").trim().toLowerCase();
+    body.password = String(formData.get("staff-password") || "");
+  }
+  if (!queueId || !body.first_name || !body.last_name || (userId === "new" && (!body.email || !body.password))) {
+    showToast("Complete the staff name, queue, email, and password before saving.");
+    return true;
+  }
+  const key = `staff-user:${userId}`;
+  const scope = form.closest(".staff-user-dialog") || form;
+  if (!beginPendingAction(key, scope, "Saving…")) return false;
+  try {
+    const path = userId === "new" ? "/api/accounts/staff/" : `/api/accounts/staff/${encodeURIComponent(userId)}/`;
+    await serverRequest(path, { method: "POST", body });
+    state.staffUserDialog = null;
+    await refreshServerData({ renderAfter: false });
+    render();
+    showToast(userId === "new" ? "Staff member created." : "Staff record updated.");
+  } catch (error) {
+    showToast(error.message || "Unable to save the staff record.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function deactivateServerStaffUser(userId) {
+  if (!serverSessionIsActive()) return false;
+  const key = `staff-user:${userId}`;
+  const scope = document.querySelector(".staff-user-dialog");
+  if (!beginPendingAction(key, scope, "Deleting…")) return false;
+  try {
+    await serverRequest(`/api/accounts/staff/${encodeURIComponent(userId)}/deactivate/`, { method: "POST" });
+    state.staffUserDialog = null;
+    state.staffDeleteConfirmId = null;
+    await refreshServerData({ renderAfter: false });
+    render();
+    showToast("Staff member deactivated.");
+  } catch (error) {
+    showToast(error.message || "Unable to deactivate the staff member.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
+}
+
+async function loadServerStaffSummary(userId, period) {
+  if (!serverSessionIsActive() || userId === "new") return null;
+  try {
+    const summary = await serverRequest(`/api/accounts/staff/${encodeURIComponent(userId)}/summary/?period=${encodeURIComponent(period)}`);
+    state.serverData.staffSummaries = state.serverData.staffSummaries || {};
+    state.serverData.staffSummaries[`${userId}:${period}`] = summary;
+    const user = getStaffUser(String(userId));
+    if (user) {
+      user.resolved = user.resolved || {};
+      user.resolved[period] = {
+        count: Number(summary.resolved_count || 0),
+        sla: summary.overall_sla_met_percent == null ? "—" : `${summary.overall_sla_met_percent}%`,
+        time: "—",
+        slaByPriority: summary.sla_by_priority || {},
+      };
+      user.activeTickets = Number(summary.active_tickets || user.activeTickets || 0);
+      user.waitingReply = Number(summary.waiting_for_reply || user.waitingReply || 0);
+    }
+    return summary;
+  } catch (error) {
+    showToast(error.message || "Unable to load staff performance.");
+    return null;
+  }
+}
+
+async function activateServerModel(family) {
+  if (!serverSessionIsActive()) return false;
+  const key = "model:activate";
+  const scope = document.querySelector(`[data-action="activate-${family}"]`);
+  if (!beginPendingAction(key, scope, "Saving…")) return false;
+  try {
+    await serverRequest(`/api/model/deployments/${encodeURIComponent(family)}/activate/`, { method: "POST" });
+    state.activeModel = family;
+    await refreshServerData({ renderAfter: false });
+    render();
+    showToast(`${family === "joint" ? "Joint" : "Separate"} model selected for future submissions.`);
+  } catch (error) {
+    showToast(error.message || "Unable to change the active model.");
+  } finally {
+    finishPendingAction(key, scope);
+  }
+  return true;
 }
 
 function continueCustomerDraft(draftId) {
   state.customerTicketDialog = null;
+  state.customerFormRequestKey = createCustomerRequestKey();
   state.activeDraftId = draftId;
+  state.emptyDraftPrompt = false;
   state.page = "new-ticket";
   render();
 }
 
 function renderCustomerTicketAction(ticket) {
-  const [, tone] = getCustomerTicketStatus(ticket);
-  if (tone === "resolved") return '<span class="customer-action-note closed">Closed</span>';
-  if (tone === "pending-close") return '<span class="customer-action-note">Ready for closure</span>';
+  const [label] = getCustomerTicketStatus(ticket);
+  if (label === "Closed") return "";
+  if (label === "Resolved") return '<span class="customer-action-note">Ready for closure</span>';
   return `<button class="button secondary row-action" type="button" data-action="mark-customer-resolved" data-ticket-id="${ticket.id}">Mark as resolved</button>`;
 }
 
@@ -679,52 +1962,222 @@ function renderCustomer() {
       ${renderCustomerTable("all")}
       ${state.customerTicketDialog ? renderCustomerTicketDialog(state.customerTicketDialog) : ""}`;
   }
+  const serverCustomer = state.serverData.customer;
+  const activeCount = serverSessionIsActive() && serverCustomer
+    ? Number(serverCustomer.active_count || 0)
+    : getCustomerActiveTickets().length;
+  const replyCount = serverSessionIsActive() && serverCustomer
+    ? Number(serverCustomer.reply_needed_count || 0)
+    : getCustomerReplyCount();
+  const replyTicket = (serverSessionIsActive() ? customerReplyPreviewTickets : getCustomerActiveTickets())
+    .find((ticket) => getCustomerTicketStatus(ticket)[0] === "Waiting for Customer");
+  const nextStep = replyTicket
+    ? `<section class="model-banner"><div class="model-token">01</div><div><strong>Your next step: reply to ${escapeHtml(replyTicket.id)}</strong><p>A support specialist has requested more information before continuing.</p></div><div class="model-banner-actions"><button class="button secondary" data-action="view-customer-ticket" data-ticket-id="${escapeHtml(replyTicket.id)}">View ticket</button></div></section>`
+    : `<section class="notice customer-dashboard-empty"><span aria-hidden="true">✓</span><span><strong>No reply is waiting from you.</strong> Your active tickets will appear here as the support team works on them.</span></section>`;
   return `
     <div class="page-heading"><div><span class="eyebrow">Good morning, ${escapeHtml(getActiveProfile().firstName)}</span><h1>What needs attention?</h1><p>Submit a request, follow a reply, or check the progress of an open ticket.</p></div><div class="heading-actions"><button class="button signal" data-action="new-ticket">Create ticket</button></div></div>
-    <section class="model-banner"><div class="model-token">01</div><div><strong>Your next step: reply to TKT-000128</strong><p>A support specialist needs the operating system and browser you are using.</p></div><div class="model-banner-actions"><button class="button secondary" data-action="view-customer-ticket" data-ticket-id="TKT-000128">View ticket</button></div></section>
-    <section class="metric-grid customer-metric-grid"><article class="metric-card"><span class="eyebrow">Active tickets</span><strong class="metric-value">${getCustomerActiveTickets().length}</strong><span class="metric-footer">Requests currently being handled</span></article><article class="metric-card"><span class="eyebrow">Your reply needed</span><strong class="metric-value">${getCustomerReplyCount()}</strong><span class="metric-footer"><span class="trend warn">Action</span> Send more details</span></article></section>
+    ${nextStep}
+    <section class="metric-grid customer-metric-grid"><article class="metric-card"><span class="eyebrow">Active tickets</span><strong class="metric-value">${activeCount}</strong><span class="metric-footer">Requests currently being handled</span></article><article class="metric-card"><span class="eyebrow">Your reply needed</span><strong class="metric-value">${replyCount}</strong><span class="metric-footer"><span class="trend warn">Action</span> Send more details</span></article></section>
     ${renderCustomerTable("active")}`;
+}
+
+function getTicketUpdatedTimestamp(ticket) {
+  const numericOrder = Number(ticket?.updatedOrder);
+  if (Number.isFinite(numericOrder) && numericOrder > 0) {
+    // Server rows carry an epoch timestamp. Prototype rows carry the age in minutes.
+    return numericOrder > 100_000_000_000
+      ? numericOrder
+      : PROTOTYPE_TODAY.getTime() - (numericOrder * 60_000);
+  }
+  const label = String(ticket?.updated || ticket?.updatedDetail || "").trim().toLowerCase();
+  if (!label || label === "—") return 0;
+  if (label === "just now" || label === "just claimed" || label === "today") return PROTOTYPE_TODAY.getTime();
+  const relative = label.match(/^(\d+)\s+(min|mins|minute|minutes|h|hr|hour|hours)\s+ago$/);
+  if (relative) {
+    const amount = Number(relative[1]);
+    const multiplier = relative[2].startsWith("h") ? 60 * 60_000 : 60_000;
+    return PROTOTYPE_TODAY.getTime() - (amount * multiplier);
+  }
+  const clock = label.match(/^(today|yesterday),?\s+(\d{1,2}):(\d{2})/);
+  if (clock) {
+    const date = new Date(PROTOTYPE_TODAY);
+    if (clock[1] === "yesterday") date.setDate(date.getDate() - 1);
+    date.setHours(Number(clock[2]), Number(clock[3]), 0, 0);
+    return date.getTime();
+  }
+  const calendar = label.match(/^(\d{1,2})\s+([a-z]{3})/i);
+  if (calendar) {
+    const date = new Date(`${calendar[1]} ${calendar[2]} ${PROTOTYPE_TODAY.getFullYear()}`);
+    if (!Number.isNaN(date.getTime())) return date.getTime();
+  }
+  return 0;
+}
+
+function sortTicketsMostRecent(left, right) {
+  const comparison = getTicketUpdatedTimestamp(right) - getTicketUpdatedTimestamp(left);
+  return comparison || String(right?.id || "").localeCompare(String(left?.id || ""));
+}
+
+function paginateTableRows(items, requestedPage) {
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / TICKET_TABLE_PAGE_SIZE));
+  const page = Math.min(Math.max(Number(requestedPage) || 1, 1), totalPages);
+  const start = (page - 1) * TICKET_TABLE_PAGE_SIZE;
+  return {
+    rows: items.slice(start, start + TICKET_TABLE_PAGE_SIZE),
+    page,
+    total,
+    totalPages,
+  };
+}
+
+function renderTablePagination(action, pagination, label = "tickets", pageStateKey = "") {
+  if (pagination.totalPages <= 1) return "";
+  const noun = pagination.total === 1 ? label.replace(/s$/, "") : label;
+  return `<div class="table-pagination" aria-label="${escapeHtml(label)} pagination"><div class="table-pagination-status"><span>Page ${pagination.page} of ${pagination.totalPages} · ${pagination.total} ${escapeHtml(noun)}</span><label class="table-page-jump">Go to page <input type="number" min="1" max="${pagination.totalPages}" value="${pagination.page}" data-table-page-input="${action}" data-page-state-key="${pageStateKey}" aria-label="Go to ${escapeHtml(label)} page" /></label></div><div><button class="button secondary" type="button" data-action="${action}" data-direction="previous" ${pagination.page <= 1 ? "disabled" : ""}>Previous</button><button class="button secondary" type="button" data-action="${action}" data-direction="next" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>Next</button></div></div>`;
+}
+
+function moveTablePage(stateKey, direction, total) {
+  const totalPages = Math.max(1, Math.ceil(total / TICKET_TABLE_PAGE_SIZE));
+  const currentPage = Number(state[stateKey]) || 1;
+  state[stateKey] = Math.max(1, Math.min(totalPages, currentPage + (direction === "next" ? 1 : -1)));
+}
+
+function moveServerTablePage(action, direction) {
+  const mapping = {
+    "paginate-customer-tickets": ["customerTicketsPage", () => state.serverData.customer?.tickets_pagination],
+    "paginate-staff-ticket-pool": ["staffTicketPoolPage", () => state.serverData.staff?.ticket_pool_pagination],
+    "paginate-staff-my-tickets": ["staffMyTicketsPage", () => state.serverData.staff?.tickets_pagination],
+    "paginate-admin-attention": ["adminAttentionPage", () => state.serverData.adminManagement?.attention_pagination],
+    "paginate-admin-all-tickets": ["adminAllTicketsPage", () => state.serverData.adminManagement?.all_pagination],
+  }[action];
+  if (!mapping) return false;
+  const [stateKey, getPagination] = mapping;
+  const pagination = getPagination() || {};
+  const totalPages = Math.max(1, Number(pagination.total_pages || 1));
+  const current = Number(pagination.page || state[stateKey] || 1);
+  state[stateKey] = Math.max(1, Math.min(totalPages, current + (direction === "next" ? 1 : -1)));
+  return true;
+}
+
+function getTableTotalForAction(action) {
+  if (action === "paginate-customer-tickets") return getCustomerDrafts().length + customerTickets.filter((ticket) => getCustomerTicketStatus(ticket)[0] !== "Closed").length;
+  if (action === "paginate-staff-ticket-pool") return getAvailableTicketPoolTickets().filter((ticket) => (
+    (state.ticketPoolFilters.priority === "all" || ticket.priority === state.ticketPoolFilters.priority)
+    && (state.ticketPoolFilters.type === "all" || ticket.type === state.ticketPoolFilters.type)
+  )).length;
+  if (action === "paginate-staff-my-tickets") return getFilteredStaffMyTickets().length;
+  if (action === "paginate-admin-attention") return getFilteredAdminAttentionTickets().length;
+  if (action === "paginate-admin-all-tickets") return getFilteredAdminTickets().length;
+  return 0;
+}
+
+function goToTablePage(action, requestedPage) {
+  const inputPage = Number(requestedPage);
+  if (!Number.isFinite(inputPage)) return;
+  const stateKey = {
+    "paginate-customer-tickets": "customerTicketsPage",
+    "paginate-staff-ticket-pool": "staffTicketPoolPage",
+    "paginate-staff-my-tickets": "staffMyTicketsPage",
+    "paginate-admin-attention": "adminAttentionPage",
+    "paginate-admin-all-tickets": "adminAllTicketsPage",
+  }[action];
+  if (!stateKey) return;
+  const serverPagination = serverSessionIsActive() && (
+    action === "paginate-customer-tickets" ? state.serverData.customer?.tickets_pagination
+      : action === "paginate-staff-ticket-pool" ? state.serverData.staff?.ticket_pool_pagination
+        : action === "paginate-staff-my-tickets" ? state.serverData.staff?.tickets_pagination
+          : action === "paginate-admin-attention" ? state.serverData.adminManagement?.attention_pagination
+            : action === "paginate-admin-all-tickets" ? state.serverData.adminManagement?.all_pagination
+              : null
+  );
+  const totalPages = serverPagination?.total_pages || Math.max(1, Math.ceil(getTableTotalForAction(action) / TICKET_TABLE_PAGE_SIZE));
+  state[stateKey] = Math.max(1, Math.min(totalPages, Math.trunc(inputPage)));
+  if (serverSessionIsActive()) void refreshServerData();
+  else render();
+}
+
+function goToStaffPerformancePage(requestedPage) {
+  const inputPage = Number(requestedPage);
+  if (!Number.isFinite(inputPage)) return;
+  const total = Number(state.serverData.staffPerformance?.total || 0);
+  const pageSize = Number(state.serverData.staffPerformance?.page_size || 5);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  state.staffPerformancePage = Math.max(1, Math.min(totalPages, Math.trunc(inputPage)));
+  if (serverSessionIsActive()) void refreshServerData();
+  else render();
 }
 
 function renderCustomerTable(scope) {
   const activeOnly = scope === "active";
-  const tickets = activeOnly ? getCustomerActiveTickets() : customerTickets;
-  const draftRows = activeOnly ? "" : getCustomerDrafts().map((draft) => `<tr class="customer-ticket-row draft-ticket-row" tabindex="0" role="button" data-action="continue-draft" data-draft-id="${draft.id}" aria-label="Continue draft ${draft.subject}"><td><span class="ticket-code">${draft.id}</span></td><td><span class="ticket-subject">${draft.subject}</span></td><td class="muted">—</td><td>${status("Draft", "draft")}</td><td class="muted">${draft.updated}</td><td><div class="draft-actions"><button class="button text" type="button" data-action="continue-draft" data-draft-id="${draft.id}">Continue</button><button class="button text danger-text" type="button" data-action="discard-draft" data-draft-id="${draft.id}">Discard</button></div></td></tr>`).join("");
-  const ticketRows = tickets.map((ticket) => {
+  const serverCustomer = state.serverData.customer;
+  const tickets = serverSessionIsActive() && serverCustomer
+    ? (activeOnly ? customerPreviewTickets : customerTickets)
+    : activeOnly
+      ? [...getCustomerActiveTickets()].sort(sortTicketsMostRecent).slice(0, TICKET_TABLE_PREVIEW_SIZE)
+      : customerTickets.filter((ticket) => getCustomerTicketStatus(ticket)[0] !== "Closed").sort(sortTicketsMostRecent);
+  const draftRecords = activeOnly ? [] : getCustomerDrafts().map((draft) => ({ kind: "draft", draft }));
+  const ticketRecords = tickets.map((ticket) => ({ kind: "ticket", ticket }));
+  const allRecords = activeOnly ? ticketRecords : [...draftRecords, ...ticketRecords];
+  const pagination = activeOnly
+    ? null
+    : serverSessionIsActive() && serverCustomer
+      ? {
+        rows: allRecords.slice(0, TICKET_TABLE_PAGE_SIZE),
+        page: Number(serverCustomer.tickets_pagination?.page || state.customerTicketsPage || 1),
+        total: Number(serverCustomer.tickets_pagination?.total || allRecords.length),
+        totalPages: Number(serverCustomer.tickets_pagination?.total_pages || 1),
+      }
+      : paginateTableRows(allRecords, state.customerTicketsPage);
+  const visibleRecords = activeOnly ? allRecords : pagination.rows;
+  const rows = visibleRecords.map((record) => {
+    if (record.kind === "draft") {
+      const { draft } = record;
+      const draftSubject = draft.subject || "Untitled draft";
+      return `<tr class="customer-ticket-row draft-ticket-row" tabindex="0" role="button" data-action="continue-draft" data-draft-id="${escapeHtml(draft.id)}" aria-label="Continue draft ${escapeHtml(draftSubject)}"><td><span class="ticket-code">${escapeHtml(draft.id)}</span></td><td><span class="ticket-subject">${escapeHtml(draftSubject)}</span></td><td class="muted">—</td><td>${status("Draft", "draft")}</td><td class="muted">${escapeHtml(draft.updated)}</td><td><div class="draft-actions"><button class="button text" type="button" data-action="continue-draft" data-draft-id="${escapeHtml(draft.id)}">Continue</button><button class="button text danger-text" type="button" data-action="discard-draft" data-draft-id="${escapeHtml(draft.id)}">Discard</button></div></td></tr>`;
+    }
+    const { ticket } = record;
     const [statusLabel, statusTone] = getCustomerTicketStatus(ticket);
-    return `<tr class="customer-ticket-row" tabindex="0" role="button" data-action="view-customer-ticket" data-ticket-id="${ticket.id}" aria-label="Open ${ticket.id}: ${ticket.subject}"><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${ticket.subject}</span></td><td>${priority(ticket.priority)}</td><td>${status(statusLabel, statusTone)}</td><td class="muted">${ticket.updated}</td><td>${renderCustomerTicketAction(ticket)}</td></tr>`;
+    return `<tr class="customer-ticket-row" tabindex="0" role="button" data-action="view-customer-ticket" data-ticket-id="${escapeHtml(ticket.id)}" aria-label="Open ${escapeHtml(ticket.id)}: ${escapeHtml(ticket.subject)}"><td><span class="ticket-code">${escapeHtml(ticket.id)}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject)}</span></td><td>${priority(ticket.priority)}</td><td>${status(statusLabel, statusTone)}</td><td class="muted">${escapeHtml(ticket.updated)}</td><td>${renderCustomerTicketAction(ticket)}</td></tr>`;
   }).join("");
-  return `<section class="panel table-panel"><div class="panel-head"><div><h2>${activeOnly ? "Active tickets" : "Tickets and drafts"}</h2><p>${activeOnly ? "Open any ticket to view its conversation. Mark an issue resolved when you no longer need help." : "Private drafts are shown first. Select a ticket row to view its details and reply."}</p></div>${activeOnly ? '<button class="button text" data-page="tickets">View all tickets</button>' : ""}</div><table class="data-table"><thead><tr><th>Reference</th><th>Subject</th><th>Priority</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${draftRows}${ticketRows}</tbody></table></section>`;
+  const emptyRow = `<tr><td colspan="6"><p class="table-empty">${activeOnly ? "No active tickets are available." : "No tickets or drafts are available."}</p></td></tr>`;
+  const paginationMarkup = pagination ? renderTablePagination("paginate-customer-tickets", pagination, "tickets", "customerTicketsPage") : "";
+  return `<section class="panel table-panel"><div class="panel-head"><div><h2>${activeOnly ? "Active tickets" : "Tickets and drafts"}</h2><p>${activeOnly ? "The five most recently updated tickets in your account. Open any ticket to view its conversation." : "Private drafts are shown first. Select a ticket row to view its details and reply."}</p></div>${activeOnly ? '<button class="button text" data-page="tickets">View all tickets</button>' : ""}</div><table class="data-table"><thead><tr><th>Reference</th><th>Subject</th><th>Priority</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows || emptyRow}</tbody></table>${paginationMarkup}</section>`;
 }
 
 function renderCustomerTicketDialog(ticketId) {
-  const ticket = customerTickets.find((item) => item.id === ticketId);
+  const ticket = state.ticketDetails.get(ticketId) || customerTickets.find((item) => item.id === ticketId);
   if (!ticket) return "";
   const [statusLabel, statusTone] = getCustomerTicketStatus(ticket);
-  const resolved = statusTone === "resolved";
-  const readyForClosure = statusTone === "pending-close";
-  const finishedNotice = resolved
-    ? '<div class="notice"><span aria-hidden="true">✓</span><span><strong>This ticket is resolved.</strong> No further action is needed unless the issue happens again.</span></div>'
-    : '<div class="notice"><span aria-hidden="true">✓</span><span><strong>You marked this ticket as resolved.</strong> It will close automatically after three days unless you reopen it.</span></div>';
+  // Closed tickets are private to administrators. If a stale client-side
+  // dialog survives an admin closure, do not render the conversation again.
+  if (statusLabel === "Closed") return "";
+  const resolved = statusLabel === "Resolved";
+  const finishedNotice = state.automaticallyResolvedTicketIds.has(ticket.id)
+      ? '<div class="notice"><span aria-hidden="true">✓</span><span><strong>This ticket was resolved automatically.</strong> We did not receive a reply for one day. You can reopen it within three days if you still need help.</span></div>'
+      : '<div class="notice"><span aria-hidden="true">✓</span><span><strong>You marked this ticket as resolved.</strong> It will close automatically after three days unless you reopen it.</span></div>';
   const ticketAction = resolved
-    ? finishedNotice
-    : readyForClosure
-      ? `${finishedNotice}<div class="form-actions"><button class="button signal" type="button" data-action="reopen-customer-ticket" data-ticket-id="${ticket.id}">Reopen ticket</button><button class="button secondary" type="button" data-action="close-customer-ticket">Close</button></div>`
-      : '<form id="customer-reply-form" class="reply-form"><label for="customer-reply">Reply to support</label><textarea id="customer-reply" name="customer-reply" placeholder="Add the details requested by the support team." required></textarea><div class="form-actions"><button class="button signal" type="submit">Send reply</button><button class="button secondary" type="button" data-action="close-customer-ticket">Cancel</button></div></form>';
+    ? `${finishedNotice}<div class="form-actions"><button class="button signal" type="button" data-action="reopen-customer-ticket" data-ticket-id="${ticket.id}">Reopen ticket</button><button class="button secondary" type="button" data-action="close-customer-ticket">Close</button></div>`
+    : '<form id="customer-reply-form" class="reply-form" novalidate><label for="customer-reply">Reply to support</label><textarea id="customer-reply" name="customer-reply" placeholder="Add the details requested by the support team." required></textarea><p id="customer-reply-error" class="form-error" role="alert" hidden></p><div class="form-actions"><button class="button signal" type="submit">Send reply</button><button class="button secondary" type="button" data-action="close-customer-ticket">Cancel</button></div></form>';
+  const messages = Array.isArray(ticket.messages) && ticket.messages.length
+    ? ticket.messages
+    : [{ author: ticket.customer || "You", author_role: "CUSTOMER", body: ticket.request }, { author: "Support team", author_role: "STAFF", body: ticket.response || "No support response has been recorded yet." }];
+  const conversation = messages.map((message) => `<article class="conversation-message ${message.author_role === "CUSTOMER" ? "customer-message" : "staff-message"}"><span>${escapeHtml(message.author || "Support team")}</span><p>${escapeHtml(message.body || "")}</p></article>`).join("");
   return `
     <div class="ticket-dialog-backdrop">
-      <section class="ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="ticket-dialog-title">
+      <section class="ticket-dialog customer-ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="ticket-dialog-title">
         <header class="ticket-dialog-header"><div><span class="ticket-code">${ticketId}</span><h2 id="ticket-dialog-title">${ticket.subject}</h2></div><button class="dialog-close" type="button" data-action="close-customer-ticket" aria-label="Close ticket details">×</button></header>
-        <dl class="ticket-dialog-meta"><div><dt>Priority</dt><dd>${priority(ticket.priority)}</dd></div><div><dt>Status</dt><dd>${status(statusLabel, statusTone)}</dd></div><div><dt>Last updated</dt><dd>${ticket.updatedDetail}</dd></div></dl>
-        <div class="ticket-dialog-body"><h3>Conversation</h3><div class="conversation"><article class="conversation-message customer-message"><span>You</span><p>${ticket.request}</p></article><article class="conversation-message staff-message"><span>Support team</span><p>${ticket.response}</p></article></div>${ticketAction}</div>
+        <dl class="ticket-dialog-meta"><div><dt>Priority</dt><dd>${priority(ticket.priority)}</dd></div><div><dt>Status</dt><dd>${status(statusLabel, statusTone)}</dd></div><div><dt>Support queue</dt><dd>Assigned support team</dd></div><div><dt>Last updated</dt><dd>${escapeHtml(ticket.updatedDetail || ticket.updated || "—")}</dd></div></dl>
+        <div class="ticket-dialog-body"><h3>Conversation</h3><div class="conversation">${conversation}</div>${ticketAction}</div>
       </section>
     </div>`;
 }
 
 function renderStaffTicketDialog(ticketId) {
-  const ticket = getStaffTicket(ticketId);
+  const ticket = getStaffTicket(ticketId) || state.ticketDetails.get(ticketId);
   if (!ticket) return "";
-  const isClosed = ticket.status[1] === "resolved";
+  const isClosed = ticket.status[0] === "Closed";
+  const isResolved = ticket.status[0] === "Resolved";
   const conversation = staffTicketConversations[ticketId] || {
     customerMessage: `The customer needs help with: ${ticket.subject}.`,
     staffMessage: isClosed
@@ -732,20 +2185,27 @@ function renderStaffTicketDialog(ticketId) {
       : "No reply has been sent yet. Review the request and give the customer a clear next step.",
   };
   const staffName = getProfileDisplayName(getActiveProfile());
+  const detailMessages = state.ticketDetails.get(ticketId)?.messages;
+  const conversationMarkup = Array.isArray(detailMessages) && detailMessages.length
+    ? detailMessages.map((message) => `<article class="conversation-message ${message.author_role === "CUSTOMER" ? "customer-message" : "staff-message"}"><span>${escapeHtml(message.author || "Support team")}</span><p>${escapeHtml(message.body || "")}</p></article>`).join("")
+    : `<article class="conversation-message customer-message"><span>${escapeHtml(ticket.createdBy)}</span><p>${escapeHtml(conversation.customerMessage)}</p></article><article class="conversation-message staff-message"><span>${escapeHtml(staffName)}</span><p>${escapeHtml(conversation.staffMessage)}</p></article>`;
   const lifecycleNotice = ticket.closure && !ticket.closure.isClosed
     ? `<div class="notice"><span aria-hidden="true">◷</span><span><strong>The customer marked this ticket as resolved.</strong> It remains in My tickets until ${formatClosureDate(ticket.closure.closesAt)}. ${getClosureCountdownLabel(ticket.closure)} unless the customer reopens it.</span></div>`
     : isClosed
       ? `<div class="notice"><span aria-hidden="true">✓</span><span><strong>This ticket is closed.</strong> Closed ${escapeHtml(ticket.closedAt || "after the three-day review window")} and available for review only.</span></div>`
       : "";
-  const ticketAction = isClosed
+  const rerouteControl = isClosed || isResolved
+    ? ""
+    : `<div class="staff-reroute-control"><div><strong>Not for your queue?</strong><span>Send this ticket to Admin for manual rerouting. You will no longer be assigned to it.</span></div><button class="button danger-text" type="button" data-action="reroute-staff-ticket" data-ticket-id="${escapeHtml(ticket.id)}">Reroute to admin</button></div>`;
+  const ticketAction = isClosed || isResolved
     ? lifecycleNotice
-    : `${lifecycleNotice}<form id="staff-reply-form" class="reply-form"><label for="staff-reply">Reply to ${escapeHtml(ticket.createdBy)}</label><textarea id="staff-reply" name="staff-reply" placeholder="Write a clear update, question, or next step for the customer." required></textarea><div class="form-actions"><button class="button signal" type="submit">Send reply</button><button class="button secondary" type="button" data-action="close-staff-ticket">Close</button></div></form>`;
+    : `${lifecycleNotice}${rerouteControl}${["Waiting for Support", "Reopened"].includes(ticket.status[0]) ? `<form id="staff-reply-form" class="reply-form" novalidate><label for="staff-reply">Reply to ${escapeHtml(ticket.createdBy)}</label><textarea id="staff-reply" name="staff-reply" placeholder="Write a clear update, question, or next step for the customer." required></textarea><p id="staff-reply-error" class="form-error" role="alert" hidden></p><div class="form-actions"><button class="button signal" type="submit">Send reply</button><button class="button secondary" type="button" data-action="close-staff-ticket">Close</button></div></form>` : `<div class="notice"><span aria-hidden="true">◷</span><span><strong>Waiting for customer.</strong> The reply box will return when the customer sends an update.</span></div>`}`;
   return `
     <div class="ticket-dialog-backdrop">
       <section class="ticket-dialog staff-ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-ticket-dialog-title">
         <header class="ticket-dialog-header"><div><span class="ticket-code">${escapeHtml(ticket.id)}</span><h2 id="staff-ticket-dialog-title">${escapeHtml(ticket.subject)}</h2></div><button class="dialog-close" type="button" data-action="close-staff-ticket" aria-label="Close ticket details">×</button></header>
         <dl class="ticket-dialog-meta"><div><dt>Customer</dt><dd>${escapeHtml(ticket.createdBy)}</dd></div><div><dt>Ticket type</dt><dd>${escapeHtml(ticket.type)}</dd></div><div><dt>Priority</dt><dd>${priority(ticket.priority)}</dd></div><div><dt>Status</dt><dd>${status(ticket.status[0], ticket.status[1])}</dd></div><div><dt>${isClosed ? "Closed" : "Last updated"}</dt><dd>${escapeHtml(ticket.closedAt || ticket.updated || "—")}</dd></div><div><dt>Assignee</dt><dd>${escapeHtml(staffName)}</dd></div></dl>
-        <div class="ticket-dialog-body"><h3>Conversation</h3><div class="conversation"><article class="conversation-message customer-message"><span>${escapeHtml(ticket.createdBy)}</span><p>${escapeHtml(conversation.customerMessage)}</p></article><article class="conversation-message staff-message"><span>${escapeHtml(staffName)}</span><p>${escapeHtml(conversation.staffMessage)}</p></article></div>${ticketAction}</div>
+        <div class="ticket-dialog-body"><h3>Conversation</h3><div class="conversation">${conversationMarkup}</div>${ticketAction}</div>
       </section>
     </div>`;
 }
@@ -753,13 +2213,28 @@ function renderStaffTicketDialog(ticketId) {
 function renderNewTicket() {
   const draft = state.activeDraftId ? getCustomerDrafts().find((item) => item.id === state.activeDraftId) : null;
   const isDraft = Boolean(draft);
+  const draftSubject = draft?.subject ?? "";
+  const draftBody = draft?.body ?? "";
+  const emptyDraftPrompt = state.emptyDraftPrompt
+    ? `<div class="draft-empty-prompt" role="alertdialog" aria-labelledby="empty-draft-title" aria-describedby="empty-draft-description"><div><strong id="empty-draft-title">This ticket is empty.</strong><p id="empty-draft-description">There is nothing to save yet. Do you want to discard it?</p></div><div class="draft-empty-actions"><button class="button danger" type="button" data-action="discard-empty-draft">Discard ticket</button><button class="button secondary" type="button" data-action="keep-empty-draft">Keep editing</button></div></div>`
+    : "";
   return `
     <div class="page-heading"><div><span class="eyebrow">${isDraft ? "Continue draft" : "New customer request"}</span><h1>${isDraft ? "Finish your draft." : "Tell us what happened."}</h1><p>${isDraft ? "Your draft is still private until you submit it." : "We will send your request to the right support team after you submit it."}</p></div></div>
-    <div class="form-shell"><form id="ticket-form" class="form-card"><div class="form-grid"><div class="form-field full"><label for="subject">Subject</label><input id="subject" name="subject" maxlength="160" value="${draft?.subject ?? ""}" placeholder="For example: I cannot sign in to my account" required /></div><div class="form-field full"><label for="description">Describe your issue</label><textarea id="description" name="description" placeholder="Include what you were trying to do, what happened, and any helpful details." required>${draft?.body ?? ""}</textarea></div><div class="form-field full"><label for="issue-choice">What best describes this?</label><select id="issue-choice" name="issue-choice" required><option value="" ${isDraft ? "" : "selected"} disabled>Select one answer</option><option value="stopped_working" ${draft?.issueChoice === "stopped_working" ? "selected" : ""}>Something stopped working</option><option value="need_action" ${draft?.issueChoice === "need_action" ? "selected" : ""}>I need something done</option><option value="ongoing_issue" ${draft?.issueChoice === "ongoing_issue" ? "selected" : ""}>I have an ongoing issue</option><option value="change_request" ${draft?.issueChoice === "change_request" ? "selected" : ""}>I want to change something</option></select><p class="field-help">Your answer helps us route the request to the right support team. You do not need to know which team handles it.</p></div></div><div class="notice"><span aria-hidden="true">↳</span><span><strong>Save or submit when ready.</strong> Drafts stay private. When submitted, your ticket receives a reference number and is sent for routing.</span></div><div class="form-actions"><button class="button signal" type="submit">Submit ticket</button><button class="button secondary" type="button" data-action="save-draft">${isDraft ? "Save changes" : "Save as draft"}</button><button class="button text" type="button" data-page="${isDraft ? "tickets" : "dashboard"}">Cancel</button></div></form></div>`;
+    <div class="form-shell"><form id="ticket-form" class="form-card" novalidate><div class="form-grid"><div class="form-field full"><label for="subject">Subject</label><input id="subject" name="subject" maxlength="160" value="${escapeHtml(draftSubject)}" placeholder="For example: I cannot sign in to my account" required /></div><div class="form-field full"><label for="description">Describe your issue</label><textarea id="description" name="description" placeholder="Include what you were trying to do, what happened, and any helpful details." required>${escapeHtml(draftBody)}</textarea></div><div class="form-field full"><label for="issue-choice">What best describes this?</label><select id="issue-choice" name="issue-choice" required><option value="" ${draft?.issueChoice ? "" : "selected"} disabled>Select one answer</option><option value="stopped_working" ${draft?.issueChoice === "stopped_working" ? "selected" : ""}>Something stopped working</option><option value="need_action" ${draft?.issueChoice === "need_action" ? "selected" : ""}>I need something done</option><option value="ongoing_issue" ${draft?.issueChoice === "ongoing_issue" ? "selected" : ""}>I have an ongoing issue</option><option value="change_request" ${draft?.issueChoice === "change_request" ? "selected" : ""}>I want to change something</option></select><p class="field-help">Your answer helps us route the request to the right support team. You do not need to know which team handles it.</p></div></div>${emptyDraftPrompt}<p id="ticket-form-error" class="form-error" role="alert" hidden></p><div class="notice"><span aria-hidden="true">↳</span><span><strong>Save or submit when ready.</strong> Drafts stay private. When submitted, your ticket receives a reference number and is sent for routing.</span></div><div class="form-actions"><button class="button signal" type="submit">Submit ticket</button><button class="button secondary" type="button" data-action="save-draft">${isDraft ? "Save changes" : "Save as draft"}</button><button class="button text" type="button" data-page="${isDraft ? "tickets" : "dashboard"}">Cancel</button></div></form></div>`;
 }
 
 function renderStaffPerformance(staffName) {
-  const period = getStaffPerformancePeriod();
+  const basePeriod = getStaffPerformancePeriod();
+  const serverPerformance = state.serverData.staffPerformance;
+  const period = serverSessionIsActive() && serverPerformance
+    ? {
+      ...basePeriod,
+      resolved: Number(serverPerformance.period_resolved_count || 0),
+      resolvedNote: `${Number(serverPerformance.period_resolved_count || 0)} in selected period`,
+      sla: serverPerformance.period_sla?.overall_sla_met == null ? "—" : `${serverPerformance.period_sla.overall_sla_met}%`,
+      slaNote: "Resolved within SLA",
+    }
+    : basePeriod;
   const maximumCadence = Math.max(...period.cadence.map((item) => item.value), 1);
   const periodControls = staffPerformancePeriods.map((item) => `<button class="performance-period${item.key === period.key ? " active" : ""}" type="button" data-action="set-staff-performance-period" data-period="${item.key}" aria-pressed="${item.key === period.key}">${item.label}</button>`).join("");
   const cadence = period.cadence.map((item) => {
@@ -767,19 +2242,18 @@ function renderStaffPerformance(staffName) {
     return `<div class="performance-bar-column"><span class="performance-bar-value">${item.value}</span><span class="performance-bar-track"><span class="performance-bar" style="height: ${height}%"></span></span><span class="performance-bar-label">${item.label}</span></div>`;
   }).join("");
   const qualityRows = period.quality.map((item) => `<div class="quality-row"><div><strong>${item.label}</strong><p>${item.detail}</p></div><span>${item.value}</span></div>`).join("");
-  const closedTickets = getClosedStaffTickets();
-  const closedTicketPageCount = Math.max(1, Math.ceil(closedTickets.length / CLOSED_TICKETS_PAGE_SIZE));
-  const closedTicketPage = Math.min(state.closedTicketsPage, closedTicketPageCount);
-  if (state.closedTicketsPage !== closedTicketPage) state.closedTicketsPage = closedTicketPage;
-  const closedTicketStart = (closedTicketPage - 1) * CLOSED_TICKETS_PAGE_SIZE;
-  const closedTicketRows = closedTickets.slice(closedTicketStart, closedTicketStart + CLOSED_TICKETS_PAGE_SIZE);
-  const outcomeRows = closedTicketRows.map((ticket) => `<tr><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${ticket.subject}</span><span class="muted">${ticket.createdBy} · ${ticket.type}</span></td><td class="muted">${ticket.closedAt}</td><td class="muted">${ticket.resolvedIn}</td><td>${status("Closed", "resolved")}</td><td><button class="button secondary row-action" type="button" data-action="review-closed-staff-ticket" data-ticket-id="${ticket.id}">Review</button></td></tr>`).join("");
-  const pagination = `<div class="closed-ticket-pagination"><span>Showing ${closedTicketStart + 1}–${Math.min(closedTicketStart + CLOSED_TICKETS_PAGE_SIZE, closedTickets.length)} of ${closedTickets.length} closed tickets</span><div><button class="button secondary" type="button" data-action="previous-closed-tickets" ${closedTicketPage === 1 ? "disabled" : ""}>Previous</button><button class="button secondary" type="button" data-action="next-closed-tickets" ${closedTicketPage === closedTicketPageCount ? "disabled" : ""}>Next</button></div></div>`;
+  const resolvedRows = serverSessionIsActive() && serverPerformance
+    ? (serverPerformance.recent_resolved_work || []).map((ticket) => { const reference = ticket.reference || `TKT-${String(ticket.id).padStart(6, "0")}`; const closed = ticket.status === "CLOSED"; return `<tr><td><span class="ticket-code">${escapeHtml(reference)}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject || "Untitled ticket")}</span><span class="muted">${escapeHtml(ticket.customer || "Customer")} · ${escapeHtml(ticket.type || "")}</span></td><td>${priority(serverPriorityLabel(ticket.priority))}</td><td>${escapeHtml(serverStatusLabels[ticket.status] || ticket.status || "Resolved")}</td><td class="muted">${escapeHtml(formatServerDate(ticket.updated_at || ticket.created_at))}</td><td>${closed ? '<span class="muted">Read-only record</span>' : `<button class="button secondary" type="button" data-action="view-staff-ticket" data-ticket-id="${escapeHtml(reference)}">Open</button>`}</td></tr>`; }).join("")
+    : "";
+  const performanceTable = serverSessionIsActive() && serverPerformance
+    ? `<section class="panel table-panel staff-performance-work"><div class="panel-head"><div><h2>Recent resolved work</h2><p>Closed tickets are retained here for staff review after the customer review window.</p></div><span class="performance-total">${serverPerformance.total || 0} reviewable</span></div><table class="data-table"><thead><tr><th>Reference</th><th>Customer issue</th><th>Priority</th><th>Status</th><th>Resolved</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${resolvedRows || '<tr><td colspan="6"><p class="table-empty">No resolved tickets are available for review.</p></td></tr>'}</tbody></table><div class="table-pagination"><div class="table-pagination-status"><span>Page ${serverPerformance.page || 1} of ${Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5)))} · ${serverPerformance.total || 0} tickets</span><label class="table-page-jump">Go to page <input type="number" min="1" max="${Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5)))}" value="${serverPerformance.page || 1}" data-server-page-input="staff-performance-page" aria-label="Go to resolved work page" /></label></div><div><button class="button secondary" type="button" data-action="staff-performance-page" data-direction="previous" ${Number(serverPerformance.page || 1) <= 1 ? "disabled" : ""}>Previous</button><button class="button secondary" type="button" data-action="staff-performance-page" data-direction="next" ${Number(serverPerformance.page || 1) >= Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5))) ? "disabled" : ""}>Next</button></div></div></section>`
+    : "";
   return `
     <div class="page-heading performance-heading"><div><span class="eyebrow">${escapeHtml(staffName)}'s performance</span><h1>Your service results</h1><p>Track your resolved work, response speed, and service quality over time.</p></div><div class="performance-periods" role="group" aria-label="Select performance period">${periodControls}</div></div>
     <section class="metric-grid performance-metric-grid"><article class="metric-card"><span class="eyebrow">Tickets resolved</span><strong class="metric-value">${period.resolved}</strong><span class="metric-footer"><span class="trend">${period.resolvedNote.split(" ")[0]}</span> ${period.resolvedNote.replace(/^[^ ]+ /, "")}</span></article><article class="metric-card"><span class="eyebrow">Average first reply</span><strong class="metric-value">${period.firstReply}</strong><span class="metric-footer"><span class="trend">${period.firstReplyNote.split(" ").slice(0, 2).join(" ")}</span> ${period.firstReplyNote.split(" ").slice(2).join(" ")}</span></article><article class="metric-card"><span class="eyebrow">Average resolution</span><strong class="metric-value">${period.resolution}</strong><span class="metric-footer"><span class="trend">${period.resolutionNote.split(" ").slice(0, 2).join(" ")}</span> ${period.resolutionNote.split(" ").slice(2).join(" ")}</span></article><article class="metric-card"><span class="eyebrow">SLA met</span><strong class="metric-value">${period.sla}</strong><span class="metric-footer">${period.slaNote}</span></article></section>
     <section class="performance-detail-grid"><article class="panel performance-cadence-panel"><div class="panel-head"><div><h2>Resolution cadence</h2><p>Tickets resolved across ${period.label.toLowerCase()}.</p></div><span class="performance-total">${period.resolved} resolved</span></div><div class="panel-body"><div class="performance-cadence-chart">${cadence}</div><p class="performance-cadence-caption">Each column records resolved tickets in its time period.</p></div></article><article class="panel performance-quality-panel"><div class="panel-head"><div><h2>Quality review</h2><p>Personal service signals for ${period.label.toLowerCase()}.</p></div></div><div class="panel-body"><div class="quality-list">${qualityRows}</div><div class="performance-note"><span aria-hidden="true">✓</span><span><strong>Keep the momentum.</strong> Your reply speed remains inside the team target for this period.</span></div></div></article></section>
-    <section class="panel performance-outcomes"><div class="panel-head"><div><h2>Recent resolved work</h2><p>Closed tickets are retained here for staff review.</p></div></div><table class="data-table"><thead><tr><th>Ticket ID</th><th>Customer issue</th><th>Closed</th><th>Resolved in</th><th>Outcome</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${outcomeRows}</tbody></table>${pagination}</section>
+     ${performanceTable}
+     <section class="performance-note"><span aria-hidden="true">↳</span><span><strong>Closed tickets remain reviewable here.</strong> They are removed from active worklists after the three-day customer review window.</span></section>
     ${state.staffTicketDialog ? renderStaffTicketDialog(state.staffTicketDialog) : ""}`;
 }
 
@@ -789,23 +2263,32 @@ function renderStaff() {
   const isMyTickets = state.page === "assigned";
   const isPerformance = state.page === "performance";
   const staffName = getProfileDisplayName(getActiveProfile());
+  const serverStaff = state.serverData.staff;
+  const serverQueue = serverStaff?.queue || {};
+  const serverMetrics = serverStaff?.metrics || {};
+  const queueName = serverStaff?.staff?.queue || roleDefinitions.staff.title || "Your queue";
   if (isPerformance) return renderStaffPerformance(staffName);
   const resolvedPeriod = getStaffResolvedPeriod();
-  const assignedTickets = getStaffActiveTickets();
+  const serverMode = serverSessionIsActive() && Boolean(serverStaff);
+  const assignedTickets = serverMode ? staffAssignedTickets : getStaffActiveTickets();
   const renderAssignedRows = (tickets, emptyMessage = "No assigned tickets match these filters.") => tickets.length
     ? tickets.map((ticket) => `<tr><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${ticket.subject}</span><span class="muted">${ticket.createdBy} · ${ticket.type}</span></td><td>${priority(ticket.priority)}</td><td>${renderStaffTicketStatus(ticket)}</td><td>${staffName}</td><td class="muted">${ticket.updated}</td><td><button class="button secondary" data-action="view-staff-ticket" data-ticket-id="${ticket.id}">Open</button></td></tr>`).join("")
     : `<tr><td colspan="7"><p class="table-empty">${emptyMessage}</p></td></tr>`;
   const renderTicketPoolRows = (tickets) => tickets.length
     ? tickets.map((ticket) => `<tr><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${ticket.subject}</span><span class="muted">${ticket.createdBy} · ${ticket.type}</span></td><td>${priority(ticket.priority)}</td><td class="muted">${ticket.createdAt}</td><td><button class="button signal" data-action="claim" data-ticket-id="${ticket.id}">Claim</button></td></tr>`).join("")
     : '<tr><td colspan="5"><p class="table-empty">No Ticket Pool tickets match these filters.</p></td></tr>';
-  const recentAssignedRows = renderAssignedRows([...assignedTickets].sort((left, right) => left.updatedOrder - right.updatedOrder).slice(0, 3));
-  const availableTicketPoolTickets = getAvailableTicketPoolTickets();
-  const filteredTicketPoolTickets = availableTicketPoolTickets.filter((ticket) => (
-    (state.ticketPoolFilters.priority === "all" || ticket.priority === state.ticketPoolFilters.priority)
-    && (state.ticketPoolFilters.type === "all" || ticket.type === state.ticketPoolFilters.type)
-  ));
+  const recentAssignedRows = renderAssignedRows(serverMode
+    ? staffPreviewTickets.slice(0, TICKET_TABLE_PREVIEW_SIZE)
+    : [...assignedTickets].sort(sortTicketsMostRecent).slice(0, TICKET_TABLE_PREVIEW_SIZE));
+  const availableTicketPoolTickets = serverMode ? ticketPoolTickets : getAvailableTicketPoolTickets();
+  const filteredTicketPoolTickets = serverMode
+    ? availableTicketPoolTickets
+    : availableTicketPoolTickets.filter((ticket) => (
+      (state.ticketPoolFilters.priority === "all" || ticket.priority === state.ticketPoolFilters.priority)
+      && (state.ticketPoolFilters.type === "all" || ticket.type === state.ticketPoolFilters.type)
+    ));
   const priorityOrder = { High: 3, Medium: 2, Low: 1 };
-  const sortedTicketPoolTickets = [...filteredTicketPoolTickets].sort((left, right) => {
+  const sortedTicketPoolTickets = serverMode ? filteredTicketPoolTickets : [...filteredTicketPoolTickets].sort((left, right) => {
     let comparison = 0;
     if (state.ticketPoolSort.key === "ticketId") {
       comparison = Number(left.id.replace(/\D/g, "")) - Number(right.id.replace(/\D/g, ""));
@@ -816,12 +2299,17 @@ function renderStaff() {
     }
     return state.ticketPoolSort.direction === "asc" ? comparison : -comparison;
   });
-  const unassignedRows = renderTicketPoolRows(sortedTicketPoolTickets);
-  const filteredAssignedTickets = assignedTickets.filter((ticket) => (
-    (state.myTicketsFilters.priority === "all" || ticket.priority === state.myTicketsFilters.priority)
-    && (state.myTicketsFilters.status === "all" || ticket.status[0] === state.myTicketsFilters.status)
-  ));
-  const sortedAssignedTickets = [...filteredAssignedTickets].sort((left, right) => {
+  const ticketPoolPagination = serverMode
+    ? {
+      rows: sortedTicketPoolTickets,
+      page: Number(serverStaff.ticket_pool_pagination?.page || state.staffTicketPoolPage || 1),
+      total: Number(serverStaff.ticket_pool_pagination?.total || sortedTicketPoolTickets.length),
+      totalPages: Number(serverStaff.ticket_pool_pagination?.total_pages || 1),
+    }
+    : paginateTableRows(sortedTicketPoolTickets, state.staffTicketPoolPage);
+  const unassignedRows = renderTicketPoolRows(ticketPoolPagination.rows);
+  const filteredAssignedTickets = serverMode ? assignedTickets : getFilteredStaffMyTickets();
+  const sortedAssignedTickets = serverMode ? filteredAssignedTickets : [...filteredAssignedTickets].sort((left, right) => {
     let comparison = 0;
     if (state.myTicketsSort.key === "ticketId") {
       comparison = Number(left.id.replace(/\D/g, "")) - Number(right.id.replace(/\D/g, ""));
@@ -832,14 +2320,27 @@ function renderStaff() {
     }
     return state.myTicketsSort.direction === "asc" ? comparison : -comparison;
   });
-  const assignedRows = renderAssignedRows(sortedAssignedTickets);
-  const tableTitle = isMyDesk ? "My active tickets" : isTicketPool ? "Technical Support tickets" : "Assigned work";
+  const assignedPagination = serverMode
+    ? {
+      rows: sortedAssignedTickets,
+      page: Number(serverStaff.tickets_pagination?.page || state.staffMyTicketsPage || 1),
+      total: Number(serverStaff.tickets_pagination?.total || sortedAssignedTickets.length),
+      totalPages: Number(serverStaff.tickets_pagination?.total_pages || 1),
+    }
+    : paginateTableRows(sortedAssignedTickets, state.staffMyTicketsPage);
+  const assignedRows = renderAssignedRows(assignedPagination.rows);
+  const tableTitle = isMyDesk ? "My active tickets" : isTicketPool ? `${queueName} tickets` : "Assigned work";
   const tableSubtitle = isMyDesk
-    ? `The three most recently updated tickets assigned to ${staffName}.`
+    ? `The five most recently updated tickets assigned to ${staffName}.`
     : isTicketPool
       ? "Unassigned tickets available for you to claim."
       : `Tickets assigned to ${staffName}. Filter or sort to focus on your next action.`;
   const tableRows = isMyDesk ? recentAssignedRows : isTicketPool ? unassignedRows : assignedRows;
+  const tablePagination = isTicketPool
+    ? renderTablePagination("paginate-staff-ticket-pool", ticketPoolPagination, "tickets", "staffTicketPoolPage")
+    : isMyTickets
+      ? renderTablePagination("paginate-staff-my-tickets", assignedPagination, "tickets", "staffMyTicketsPage")
+      : "";
   const renderSortHeader = (sort, action, key, label) => {
     const isSorted = sort.key === key;
     const direction = sort.direction;
@@ -858,15 +2359,16 @@ function renderStaff() {
       <label><span>Priority</span><select data-ticket-pool-filter="priority" aria-label="Filter by priority"><option value="all" ${state.ticketPoolFilters.priority === "all" ? "selected" : ""}>All priorities</option><option value="High" ${state.ticketPoolFilters.priority === "High" ? "selected" : ""}>High priority</option><option value="Medium" ${state.ticketPoolFilters.priority === "Medium" ? "selected" : ""}>Medium priority</option><option value="Low" ${state.ticketPoolFilters.priority === "Low" ? "selected" : ""}>Low priority</option></select></label>
       <label><span>Ticket type</span><select data-ticket-pool-filter="type" aria-label="Filter by ticket type"><option value="all" ${state.ticketPoolFilters.type === "all" ? "selected" : ""}>All ticket types</option><option value="Incident" ${state.ticketPoolFilters.type === "Incident" ? "selected" : ""}>Incident</option><option value="Problem" ${state.ticketPoolFilters.type === "Problem" ? "selected" : ""}>Problem</option><option value="Request" ${state.ticketPoolFilters.type === "Request" ? "selected" : ""}>Request</option></select></label>
       <button class="button text" type="button" data-action="clear-ticket-pool-filters">Clear filters</button>
-      <span class="ticket-pool-filter-count">Showing ${sortedTicketPoolTickets.length} of ${availableTicketPoolTickets.length} tickets</span>
+      <span class="ticket-pool-filter-count">Showing ${sortedTicketPoolTickets.length} of ${serverMode ? Number(serverStaff.ticket_pool_pagination?.total || sortedTicketPoolTickets.length) : availableTicketPoolTickets.length} tickets</span>
     </div>` : "";
-  const activeMyTicketsFilters = Number(state.myTicketsFilters.priority !== "all") + Number(state.myTicketsFilters.status !== "all");
+  const activeMyTicketsFilters = Number(state.myTicketsFilters.priority !== "all") + Number(state.myTicketsFilters.status !== "all") + Number(Boolean(state.myTicketsSearch));
   const myTicketsFilters = isMyTickets && state.myTicketsFiltersOpen ? `
     <div class="my-tickets-filters" role="group" aria-label="Filter ${staffName}'s assigned tickets">
+      <form id="staff-my-tickets-search-form" class="staff-my-tickets-search"><label for="staff-my-tickets-search">Search tickets</label><div class="staff-my-tickets-search-input"><input id="staff-my-tickets-search" name="staff-my-tickets-search" type="search" value="${escapeHtml(state.myTicketsSearch)}" placeholder="Ticket ID, subject, customer, queue, or status" /><button type="button" data-action="clear-staff-my-tickets-search" aria-label="Clear ticket search" ${state.myTicketsSearch ? "" : "disabled"}>×</button></div><button class="button secondary" type="submit">Search</button></form>
       <label><span>Priority</span><select data-my-tickets-filter="priority" aria-label="Filter by priority"><option value="all" ${state.myTicketsFilters.priority === "all" ? "selected" : ""}>All priorities</option><option value="High" ${state.myTicketsFilters.priority === "High" ? "selected" : ""}>High priority</option><option value="Medium" ${state.myTicketsFilters.priority === "Medium" ? "selected" : ""}>Medium priority</option><option value="Low" ${state.myTicketsFilters.priority === "Low" ? "selected" : ""}>Low priority</option></select></label>
-      <label><span>Status</span><select data-my-tickets-filter="status" aria-label="Filter by status"><option value="all" ${state.myTicketsFilters.status === "all" ? "selected" : ""}>All statuses</option><option value="Open" ${state.myTicketsFilters.status === "Open" ? "selected" : ""}>Open</option><option value="Reply needed" ${state.myTicketsFilters.status === "Reply needed" ? "selected" : ""}>Reply needed</option><option value="In progress" ${state.myTicketsFilters.status === "In progress" ? "selected" : ""}>In progress</option><option value="Waiting for customer" ${state.myTicketsFilters.status === "Waiting for customer" ? "selected" : ""}>Waiting for customer</option><option value="Customer resolved" ${state.myTicketsFilters.status === "Customer resolved" ? "selected" : ""}>Customer resolved</option></select></label>
+      <label><span>Status</span><select data-my-tickets-filter="status" aria-label="Filter by status"><option value="all" ${state.myTicketsFilters.status === "all" ? "selected" : ""}>All statuses</option><option value="Waiting for Support" ${state.myTicketsFilters.status === "Waiting for Support" ? "selected" : ""}>Waiting for Support</option><option value="Waiting for Customer" ${state.myTicketsFilters.status === "Waiting for Customer" ? "selected" : ""}>Waiting for Customer</option><option value="Reopened" ${state.myTicketsFilters.status === "Reopened" ? "selected" : ""}>Reopened</option><option value="Resolved" ${state.myTicketsFilters.status === "Resolved" ? "selected" : ""}>Resolved</option></select></label>
       <button class="button text" type="button" data-action="clear-my-tickets-filters">Clear filters</button>
-      <span class="my-tickets-filter-count">Showing ${sortedAssignedTickets.length} of ${assignedTickets.length} tickets</span>
+      <span class="my-tickets-filter-count">Showing ${sortedAssignedTickets.length} of ${serverMode ? Number(serverStaff.tickets_pagination?.total || sortedAssignedTickets.length) : assignedTickets.length} tickets</span>
     </div>` : "";
   const tableAction = isMyDesk
     ? '<button class="button text panel-head-action" type="button" data-page="assigned">View all tickets</button>'
@@ -876,9 +2378,9 @@ function renderStaff() {
         ? `<button class="button secondary" type="button" data-action="toggle-my-tickets-filters" aria-expanded="${state.myTicketsFiltersOpen}">${activeMyTicketsFilters ? `Filters (${activeMyTicketsFilters})` : "Filter tickets"}</button>`
       : '<button class="button secondary" type="button" data-action="filter">Filter list</button>';
   const tableFilters = isTicketPool ? ticketPoolFilters : isMyTickets ? myTicketsFilters : "";
-  const table = `<section class="panel table-panel"><div class="panel-head"><div><h2>${tableTitle}</h2><p>${tableSubtitle}</p></div>${tableAction}</div>${tableFilters}<table class="data-table"><thead><tr>${tableHeaders}</tr></thead><tbody>${tableRows}</tbody></table></section>`;
-  const queueBanner = `<section class="queue-banner"><div><span class="eyebrow">Your queue</span><h2>Technical Support</h2><p>System access, account, and technical troubleshooting requests.</p></div><div class="queue-count">QUEUE BACKLOG<strong>18</strong></div><div class="queue-count">UNASSIGNED<strong>${availableTicketPoolTickets.length}</strong></div><div class="queue-count">HIGH PRIORITY<strong>${availableTicketPoolTickets.filter((ticket) => ticket.priority === "High").length}</strong></div></section>`;
-  const deskMetrics = `<section class="metric-grid"><article class="metric-card"><span class="eyebrow">My active tickets</span><strong class="metric-value">${assignedTickets.length}</strong><span class="metric-footer"><span class="trend warn">${getStaffPendingReplyCount()}</span> ticket waiting your reply</span></article><article class="metric-card"><span class="eyebrow">Pending closure</span><strong class="metric-value">2</strong><span class="metric-footer">Ready for your final review</span></article><article class="metric-card resolution-metric"><div class="metric-card-header"><span class="eyebrow">Tickets resolved</span><button class="metric-swap" type="button" data-action="cycle-staff-resolved-period" aria-label="Show the next resolved-ticket period" title="Show today, this week, or this month">↻</button></div><strong class="metric-value">${resolvedPeriod.value}</strong><span class="metric-footer"><span class="period-label">${resolvedPeriod.label}</span>${resolvedPeriod.detail}</span></article><article class="metric-card"><span class="eyebrow">Route corrections</span><strong class="metric-value">2</strong><span class="metric-footer"><span class="period-label">This week</span> Recorded for model review</span></article></section>`;
+  const table = `<section class="panel table-panel"><div class="panel-head"><div><h2>${tableTitle}</h2><p>${tableSubtitle}</p></div>${tableAction}</div>${tableFilters}<table class="data-table"><thead><tr>${tableHeaders}</tr></thead><tbody>${tableRows}</tbody></table>${tablePagination}</section>`;
+  const queueBanner = `<section class="queue-banner"><div><span class="eyebrow">Your queue</span><h2>${escapeHtml(queueName)}</h2><p>Tickets routed to the support area assigned to you.</p></div><div class="queue-count">QUEUE BACKLOG<strong>${serverQueue.backlog ?? 18}</strong></div><div class="queue-count">UNASSIGNED<strong>${serverQueue.unassigned ?? availableTicketPoolTickets.length}</strong></div><div class="queue-count">HIGH PRIORITY<strong>${serverQueue.high_priority ?? availableTicketPoolTickets.filter((ticket) => ticket.priority === "High").length}</strong></div></section>`;
+  const deskMetrics = `<section class="metric-grid"><article class="metric-card"><span class="eyebrow">My active tickets</span><strong class="metric-value">${serverMetrics.active_tickets ?? assignedTickets.length}</strong><span class="metric-footer"><span class="trend warn">${serverMetrics.waiting_for_reply ?? getStaffPendingReplyCount()}</span> ticket waiting your reply</span></article><article class="metric-card"><span class="eyebrow">Pending closure</span><strong class="metric-value">${serverMetrics.pending_closure ?? 2}</strong><span class="metric-footer">Ready for your final review</span></article><article class="metric-card resolution-metric"><div class="metric-card-header"><span class="eyebrow">Tickets resolved</span><button class="metric-swap" type="button" data-action="cycle-staff-resolved-period" aria-label="Show the next resolved-ticket period" title="Show today, this week, or this month">↻</button></div><strong class="metric-value">${resolvedPeriod.value}</strong><span class="metric-footer"><span class="period-label">${resolvedPeriod.label}</span>${resolvedPeriod.detail}</span></article><article class="metric-card"><span class="eyebrow">Route corrections</span><strong class="metric-value">${serverMetrics.route_corrections ?? 2}</strong><span class="metric-footer"><span class="period-label">This week</span> Recorded for model review</span></article></section>`;
   if (isTicketPool) return `<section class="ticket-pool-page">${queueBanner}${table}</section>`;
   if (isMyTickets) return `
     <div class="page-heading staff-worklist-heading"><div><span class="eyebrow">${staffName}'s workspace</span><h1>My tickets</h1><p>Review the tickets assigned to ${staffName}, reply where needed, and keep each customer informed.</p></div></div>
@@ -892,7 +2394,58 @@ function renderStaff() {
 }
 
 function getAdminTicket(ticketId) {
-  return adminTickets.find((ticket) => ticket.id === ticketId);
+  return adminTickets.find((ticket) => ticket.id === ticketId)
+    || serverAdminAttentionTickets.find((ticket) => ticket.id === ticketId)
+    || state.ticketDetails.get(ticketId);
+}
+
+function forceCloseAdminTicket(ticketId, reason) {
+  const ticket = getAdminTicket(ticketId);
+  if (!ticket || ticket.status[0] === "Closed") {
+    showToast("That ticket is already closed or no longer available.");
+    return;
+  }
+  const administrator = getProfileDisplayName(accountProfiles.admin);
+  const closure = {
+    closedAt: "Today, 12:00",
+    closedOrder: PROTOTYPE_TODAY.getTime(),
+    reason,
+    closedBy: administrator,
+  };
+  state.forceClosedTickets.set(ticketId, closure);
+  state.claimedTicketAssignments.delete(ticketId);
+  state.staffReroutedTicketIds.delete(ticketId);
+  state.pendingClosureTicketIds.delete(ticketId);
+  state.customerResolutionDates.delete(ticketId);
+  state.waitingForCustomerSince.delete(ticketId);
+  state.automaticallyResolvedTicketIds.delete(ticketId);
+  setTicketStatus(ticketId, "Closed", "resolved", {
+    updated: `Force closed by ${administrator}`,
+    updatedDetail: closure.closedAt,
+    routingFailed: false,
+    overdue: false,
+    forceClosed: true,
+    forceCloseReason: reason,
+    forceClosedBy: administrator,
+    closedAt: closure.closedAt,
+  });
+  adminActivityEvents.unshift({
+    tone: "signal",
+    category: "Ticket",
+    title: "Administrator force closed a ticket",
+    detail: `${ticketId} was closed by ${administrator}. Reason: ${reason}`,
+    actor: administrator,
+    time: "JUST NOW",
+  });
+  auditLogRecords.unshift({
+    timestamp: "19 Aug 2026, 12:00",
+    actor: administrator,
+    category: "Ticket",
+    action: "Force closed ticket",
+    record: ticketId,
+    detail: `Closure reason: ${reason}`,
+  });
+  closeActiveDialog("adminTicketDialog", () => showToast(`${ticketId} was force closed and removed from active work.`));
 }
 
 function getAdminTicketAttentionReason(ticket) {
@@ -903,12 +2456,95 @@ function getAdminTicketAttentionReason(ticket) {
 
 function getAdminAttentionTickets() {
   return adminTickets
+    .filter((ticket) => ticket.status?.[0] !== "Closed")
     .map((ticket) => ({ ticket, reason: getAdminTicketAttentionReason(ticket) }))
     .filter(({ reason }) => reason)
     .sort((left, right) => left.reason.order - right.reason.order);
 }
 
+function getAdminTicketSearchText(ticket, reason = null) {
+  return [
+    ticket.id,
+    ticket.subject,
+    ticket.request,
+    ticket.customer,
+    ticket.type,
+    ticket.model,
+    ticket.routingFailed ? "Routing failed" : ticket.queue,
+    ticket.priority || "Unclassified",
+    ticket.status?.[0],
+    ["Waiting for Support", "Waiting for Customer"].includes(ticket.status?.[0]) ? "In progress" : "",
+    ticket.assignee,
+    ticket.updated,
+    reason?.label,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function adminTicketMatchesFilters(ticket, reason = null) {
+  const filters = state.adminTicketFilters;
+  const search = state.adminTicketSearch.trim().toLowerCase();
+  const queue = ticket.routingFailed ? "Routing failed" : (ticket.queue || "Unassigned");
+  const priorityLabel = ticket.priority || "Unclassified";
+  const statusMatches = filters.status === "all"
+    || (filters.status === "In progress" && ["Waiting for Support", "Waiting for Customer"].includes(ticket.status?.[0]))
+    || ticket.status?.[0] === filters.status;
+  return (!search || getAdminTicketSearchText(ticket, reason).includes(search))
+    && (filters.model === "all" || ticket.model === filters.model)
+    && (filters.type === "all" || ticket.type === filters.type)
+    && (filters.queue === "all" || queue === filters.queue)
+    && (filters.priority === "all" || priorityLabel === filters.priority)
+    && statusMatches
+    && (filters.assignee === "all" || (ticket.assignee || "Unassigned") === filters.assignee);
+}
+
+function getFilteredAdminAttentionTickets() {
+  return getAdminAttentionTickets().filter(({ ticket, reason }) => adminTicketMatchesFilters(ticket, reason));
+}
+
+function getFilteredAdminTickets() {
+  return adminTickets.filter((ticket) => adminTicketMatchesFilters(ticket));
+}
+
+function getAdminSortValue(item, key, attentionOnly = false) {
+  const ticket = attentionOnly ? item.ticket : item;
+  const reason = attentionOnly ? item.reason : getAdminTicketAttentionReason(ticket);
+  if (key === "reference") return Number(String(ticket.id || "").replace(/\D/g, "")) || 0;
+  if (key === "model") return ticket.model || "";
+  if (key === "queue") return ticket.routingFailed ? "Routing failed" : (ticket.queue || "Unassigned");
+  if (key === "priority") return ({ High: 3, Medium: 2, Low: 1 }[ticket.priority] || 0);
+  if (key === "status") return ticket.status?.[0] || "";
+  if (key === "assignee") return ticket.assignee || "Unassigned";
+  if (key === "updated") return getTicketUpdatedTimestamp(ticket);
+  if (key === "attention") return reason?.label || "";
+  return "";
+}
+
+function sortAdminTicketRecords(records, attentionOnly = false) {
+  const { key, direction } = state.adminTicketSort;
+  return records.slice().sort((left, right) => {
+    const leftValue = getAdminSortValue(left, key, attentionOnly);
+    const rightValue = getAdminSortValue(right, key, attentionOnly);
+    let comparison;
+    if (typeof leftValue === "number" && typeof rightValue === "number") comparison = leftValue - rightValue;
+    else comparison = String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: "base" });
+    if (comparison === 0) comparison = String(getAdminSortValue(left, "reference", attentionOnly)).localeCompare(String(getAdminSortValue(right, "reference", attentionOnly)));
+    return direction === "asc" ? comparison : -comparison;
+  });
+}
+
+function adminFilterOptions() {
+  const queues = [...new Set(adminTickets.map((ticket) => ticket.routingFailed ? "Routing failed" : (ticket.queue || "Unassigned")).filter(Boolean))].sort();
+  const assignees = [...new Set(adminTickets.map((ticket) => ticket.assignee || "Unassigned").filter(Boolean))].sort();
+  return { queues, assignees };
+}
+
 function getAdminAttentionCounts() {
+  if (serverSessionIsActive() && state.serverData.adminOverview) {
+    return {
+      routingFailures: Number(state.serverData.adminOverview.routing_failures || 0),
+      overdue: Number(state.serverData.adminOverview.overdue || 0),
+    };
+  }
   return adminTickets.reduce((counts, ticket) => {
     if (ticket.routingFailed) counts.routingFailures += 1;
     if (ticket.overdue) counts.overdue += 1;
@@ -922,6 +2558,21 @@ function getAdminOverviewPeriod() {
 
 function getAdminOverviewMetrics() {
   const period = getAdminOverviewPeriod();
+  const serverOverview = state.serverData.adminOverview;
+  if (serverSessionIsActive() && serverOverview) {
+    const serverPeriod = { ...period, label: String(serverOverview.period || period.key).replace(/^./, (character) => character.toUpperCase()) };
+    const routeCorrections = Number(serverOverview.route_corrections || 0);
+    return {
+      period: serverPeriod,
+      ticketsProcessed: Number(serverOverview.tickets_processed || 0),
+      openBacklog: Number(serverOverview.open_backlog || 0),
+      highPriority: Number(serverOverview.high_priority || 0),
+      routeCorrections,
+      routeCorrectionRate: Number(serverOverview.tickets_processed || 0) ? (routeCorrections / Number(serverOverview.tickets_processed)) * 100 : 0,
+      routingFailures: Number(serverOverview.routing_failures || 0),
+      overdue: Number(serverOverview.overdue || 0),
+    };
+  }
   const routeCorrections = period.routeCorrections + adminTickets.filter((ticket) => ticket.routeCorrected).length;
   const attention = getAdminAttentionCounts();
   return {
@@ -937,11 +2588,20 @@ function getAdminOverviewMetrics() {
 }
 
 function getAdminOverduePeriod() {
+  const serverOverview = state.serverData.adminOverdueOverview || state.serverData.adminOverview;
+  if (serverSessionIsActive() && serverOverview) {
+    const counts = {};
+    (serverOverview.sla_breaches_by_queue || []).forEach((item) => { counts[item.queue] = Number(item.overdue || 0); });
+    return { key: state.adminOverduePeriod, label: state.adminOverduePeriod, counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) };
+  }
   return adminOverduePeriods.find((period) => period.key === state.adminOverduePeriod) || adminOverduePeriods[0];
 }
 
 function getAdminSlaBreachesByQueue(period) {
-  return adminQueueOptions.map((queue) => ({ queue, count: period.counts[queue] || 0 }));
+  const queueNames = serverSessionIsActive() && state.serverData.queuesStaff?.queues?.length
+    ? state.serverData.queuesStaff.queues.map((queue) => queue.name)
+    : adminQueueOptions;
+  return queueNames.map((queue) => ({ queue, count: period.counts[queue] || 0 }));
 }
 
 function renderAdminOverdueQueueRows(period) {
@@ -967,14 +2627,29 @@ function renderAdminTicketRows(tickets, attentionOnly = false) {
   return tickets.map((item) => {
     const ticket = attentionOnly ? item.ticket : item;
     const reason = attentionOnly ? item.reason : getAdminTicketAttentionReason(ticket);
-    const queue = ticket.routingFailed ? '<span class="routing-failed-label">Routing failed</span>' : escapeHtml(ticket.queue);
+    const queue = ticket.routingFailed ? '<span class="routing-failed-label">Routing failed</span>' : escapeHtml(ticket.queue || "Unassigned");
     const modelTone = ticket.model === "Joint" ? "open" : "draft";
     const actionLabel = ticket.routingFailed ? "Reroute" : "View details";
-    return `<tr class="${reason ? "admin-attention-row" : ""}"><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject)}</span><span class="muted">${escapeHtml(ticket.customer)} · ${escapeHtml(ticket.type)}</span></td><td><span class="status ${modelTone}">${ticket.model}</span></td><td>${queue}</td><td>${ticket.priority ? priority(ticket.priority) : "—"}</td><td>${status(ticket.status[0], ticket.status[1])}</td>${attentionOnly ? `<td><span class="attention-reason ${reason.tone}">${reason.label}</span></td>` : `<td>${escapeHtml(ticket.assignee)}</td><td class="muted">${escapeHtml(ticket.updated)}</td>`}<td><button class="button ${ticket.routingFailed ? "signal" : "secondary"} row-action" type="button" data-action="manage-admin-ticket" data-ticket-id="${ticket.id}">${actionLabel}</button></td></tr>`;
+    return `<tr class="${reason ? "admin-attention-row" : ""}"><td><span class="ticket-code">${ticket.id}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject)}</span><span class="muted">${escapeHtml(ticket.customer)} · ${escapeHtml(ticket.type)}</span></td><td><span class="status ${modelTone}">${ticket.model}</span></td><td>${queue}</td><td>${ticket.priority ? priority(ticket.priority) : "—"}</td><td>${renderAdminTicketStatus(ticket)}</td>${attentionOnly ? `<td><span class="attention-reason ${reason.tone}">${reason.label}</span></td>` : `<td>${escapeHtml(ticket.assignee)}</td><td class="muted">${escapeHtml(ticket.updated)}</td>`}<td><button class="button ${ticket.routingFailed ? "signal" : "secondary"} row-action" type="button" data-action="manage-admin-ticket" data-ticket-id="${ticket.id}">${actionLabel}</button></td></tr>`;
   }).join("");
 }
 
-function openAdminTicket(ticketId) {
+function renderAdminSortHeader(key, label) {
+  const isSorted = state.adminTicketSort.key === key;
+  const direction = isSorted ? state.adminTicketSort.direction : "none";
+  const indicator = isSorted ? (direction === "asc" ? "↑" : "↓") : "↕";
+  const sortState = isSorted ? (direction === "asc" ? "ascending" : "descending") : "none";
+  return `<th aria-sort="${sortState}"><button class="table-sort${isSorted ? " active" : ""}" type="button" data-action="sort-admin-tickets" data-sort-key="${key}" aria-pressed="${isSorted}" title="Sort by ${label}">${label}<span aria-hidden="true">${indicator}</span></button></th>`;
+}
+
+function renderAdminTicketStatus(ticket) {
+  if (["Waiting for Support", "Waiting for Customer"].includes(ticket.status[0])) {
+    return status("In progress", "progress");
+  }
+  return status(ticket.status[0], ticket.status[1]);
+}
+
+async function openAdminTicket(ticketId) {
   if (!getAdminTicket(ticketId)) {
     showToast("That ticket is no longer available in Ticket Management.");
     return;
@@ -984,34 +2659,109 @@ function openAdminTicket(ticketId) {
   state.staffTicketDialog = null;
   state.adminTicketDialog = ticketId;
   render();
+  if (serverSessionIsActive()) await refreshServerTicketDetail(ticketId, "admin");
+}
+
+function renderAdminModelMetadata(ticket) {
+  const confidence = ticket.predictionConfidence
+    ? `<small class="admin-model-confidence">Queue ${ticket.predictionConfidence.queue}% · Priority ${ticket.predictionConfidence.priority}%</small>`
+    : `<small class="admin-model-confidence unavailable">No prediction recorded</small>`;
+  return `<span class="status ${ticket.model === "Joint" ? "open" : "draft"}">${ticket.model}</span>${confidence}`;
+}
+
+function renderAdminPreviousPrediction(ticket) {
+  if (!ticket.reroutedByStaff || !ticket.originalPrediction) return "";
+  const { queue, priority: originalPriority } = ticket.originalPrediction;
+  return `<div class="admin-previous-prediction"><dt>Previous model prediction</dt><dd><span><small>Queue</small><strong>${escapeHtml(queue || "—")}</strong></span><span><small>Priority</small><strong>${escapeHtml(originalPriority || "—")}</strong></span><em>Staff requested manual rerouting.</em></dd></div>`;
+}
+
+function renderAdminConversation(ticket) {
+  const detailMessages = state.ticketDetails.get(ticket.id)?.messages;
+  if (Array.isArray(detailMessages) && detailMessages.length) {
+    return `<section class="admin-ticket-conversation"><div class="admin-conversation-heading"><h3>Conversation</h3><span>Read only</span></div><div class="conversation">${detailMessages.map((message) => `<article class="conversation-message ${message.author_role === "CUSTOMER" ? "customer-message" : "staff-message"}"><span>${escapeHtml(message.author || "Support team")}</span><p>${escapeHtml(message.body || "")}</p></article>`).join("")}</div></section>`;
+  }
+  const conversation = staffTicketConversations[ticket.id] || {};
+  const customerMessage = conversation.customerMessage || ticket.request;
+  const staffMessage = conversation.staffMessage || "No staff response has been recorded for this ticket yet.";
+  const staffName = ticket.assignee === "Unassigned" ? "Support team" : ticket.assignee;
+  return `<section class="admin-ticket-conversation"><div class="admin-conversation-heading"><h3>Conversation</h3><span>Read only</span></div><div class="conversation"><article class="conversation-message customer-message"><span>${escapeHtml(ticket.customer)}</span><p>${escapeHtml(customerMessage)}</p></article><article class="conversation-message staff-message"><span>${escapeHtml(staffName)}</span><p>${escapeHtml(staffMessage)}</p></article></div></section>`;
 }
 
 function renderAdminTicketDialog(ticketId) {
   const ticket = getAdminTicket(ticketId);
   if (!ticket) return "";
-  const queueOptions = adminQueueOptions.map((queue) => `<option value="${queue}" ${ticket.queue === queue ? "selected" : ""}>${queue}</option>`).join("");
-  const assigneeOptions = adminAssigneeOptions.map((assignee) => `<option value="${assignee}" ${ticket.assignee === assignee ? "selected" : ""}>${assignee}</option>`).join("");
+  const queueNames = serverSessionIsActive() && state.serverData.queuesStaff?.queues?.length
+    ? state.serverData.queuesStaff.queues.map((queue) => queue.name)
+    : adminQueueOptions;
+  const queueOptions = queueNames.map((queue) => `<option value="${escapeHtml(queue)}" ${ticket.queue === queue ? "selected" : ""}>${escapeHtml(queue)}</option>`).join("");
+  const assigneeOptions = renderAdminAssigneeOptions(ticket.queue, ticket.assignee);
+  const priorityOptions = adminPriorityOptions.map((item) => `<option value="${item}" ${ticket.priority === item ? "selected" : ""}>${item}</option>`).join("");
   const routeSelection = ticket.queue ? queueOptions : `<option value="" selected disabled>Select a queue</option>${queueOptions}`;
+  const isClosed = ticket.status[0] === "Closed";
+  const managementForm = isClosed ? "" : `<form id="admin-ticket-management-form" class="admin-ticket-actions" data-ticket-id="${ticket.id}"><div class="form-grid"><div class="form-field"><label for="admin-ticket-queue">Route to</label><select id="admin-ticket-queue" name="admin-ticket-queue" required>${routeSelection}</select></div><div class="form-field"><label for="admin-ticket-assignee">Assign to</label><select id="admin-ticket-assignee" name="admin-ticket-assignee" required>${assigneeOptions}</select></div><div class="form-field"><label for="admin-ticket-priority">Priority</label><select id="admin-ticket-priority" name="admin-ticket-priority" required>${ticket.priority ? priorityOptions : `<option value="" selected disabled>Select priority</option>${priorityOptions}`}</select></div></div><div class="form-actions"><button class="button signal" type="submit">Save ticket changes</button><button class="button secondary" type="button" data-action="close-admin-ticket">Cancel</button></div></form>`;
+  const forceCloseControl = isClosed
+    ? `<section class="admin-closed-state"><strong>${ticket.forceClosed ? "Force closed by administrator" : "Ticket closed automatically"}</strong><p>${ticket.forceClosed ? `Reason: ${escapeHtml(ticket.forceCloseReason || "Not recorded")}` : escapeHtml(ticket.closureReason || "Customer did not reopen the resolved ticket within 3 days.")}</p></section>`
+    : `<form id="admin-force-close-form" class="admin-force-close" data-ticket-id="${ticket.id}"><div class="admin-force-close-copy"><span class="eyebrow">Administrative action</span><strong>Force close ticket</strong><p>Use only when no further support action is required. The customer and staff cannot reopen it.</p></div><div class="form-field"><label for="admin-force-close-reason">Closure reason</label><textarea id="admin-force-close-reason" name="admin-force-close-reason" maxlength="500" required placeholder="Explain why this ticket must be closed."></textarea></div><div class="form-actions"><button class="button admin-force-close-button" type="submit">Force close ticket</button></div></form>`;
   return `
-    <div class="ticket-dialog-backdrop" role="presentation"><section class="ticket-dialog admin-ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-ticket-dialog-title"><header class="ticket-dialog-header"><div><span class="ticket-code">${ticket.id}</span><h2 id="admin-ticket-dialog-title">${escapeHtml(ticket.subject)}</h2></div><button class="dialog-close" type="button" data-action="close-admin-ticket" aria-label="Close ticket details">×</button></header><dl class="ticket-dialog-meta"><div><dt>Customer</dt><dd>${escapeHtml(ticket.customer)}</dd></div><div><dt>Ticket type</dt><dd>${escapeHtml(ticket.type)}</dd></div><div><dt>Model used</dt><dd><span class="status ${ticket.model === "Joint" ? "open" : "draft"}">${ticket.model}</span></dd></div><div><dt>Priority</dt><dd>${ticket.priority ? priority(ticket.priority) : "—"}</dd></div><div><dt>Status</dt><dd>${status(ticket.status[0], ticket.status[1])}</dd></div><div><dt>Current assignee</dt><dd>${escapeHtml(ticket.assignee)}</dd></div></dl><div class="ticket-dialog-body"><section class="admin-ticket-request"><h3>Customer request</h3><p>${escapeHtml(ticket.request)}</p></section><div class="admin-ticket-note"><span aria-hidden="true">↳</span><span><strong>Customer communication is staff-only.</strong> Administrators can adjust the route and assignee, but cannot reply to the customer.</span></div><form id="admin-ticket-management-form" class="admin-ticket-actions" data-ticket-id="${ticket.id}"><div class="form-grid"><div class="form-field"><label for="admin-ticket-queue">Route to</label><select id="admin-ticket-queue" name="admin-ticket-queue" required>${routeSelection}</select></div><div class="form-field"><label for="admin-ticket-assignee">Assign to</label><select id="admin-ticket-assignee" name="admin-ticket-assignee" required>${assigneeOptions}</select></div></div><div class="form-actions"><button class="button signal" type="submit">Save routing and assignment</button><button class="button secondary" type="button" data-action="close-admin-ticket">Cancel</button></div></form></div></section></div>`;
+    <div class="ticket-dialog-backdrop" role="presentation"><section class="ticket-dialog admin-ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-ticket-dialog-title"><header class="ticket-dialog-header"><div><span class="ticket-code">${ticket.id}</span><h2 id="admin-ticket-dialog-title">${escapeHtml(ticket.subject)}</h2></div><button class="dialog-close" type="button" data-action="close-admin-ticket" aria-label="Close ticket details">×</button></header><dl class="ticket-dialog-meta"><div><dt>Customer</dt><dd>${escapeHtml(ticket.customer)}</dd></div><div><dt>Ticket type</dt><dd>${escapeHtml(ticket.type)}</dd></div><div><dt>Model used</dt><dd class="admin-model-used">${renderAdminModelMetadata(ticket)}</dd></div>${renderAdminPreviousPrediction(ticket)}<div><dt>Priority</dt><dd>${ticket.priority ? priority(ticket.priority) : "—"}</dd></div><div><dt>Status</dt><dd>${renderAdminTicketStatus(ticket)}</dd></div><div><dt>Current assignee</dt><dd>${escapeHtml(ticket.assignee)}</dd></div></dl><div class="ticket-dialog-body"><section class="admin-ticket-request"><h3>Customer request</h3><p>${escapeHtml(ticket.request)}</p></section>${renderAdminConversation(ticket)}<div class="admin-ticket-note"><span aria-hidden="true">↳</span><span><strong>Customer communication is staff-only.</strong> Administrators can review the conversation, adjust the route, priority, and assignee, force close a ticket with a recorded reason, but cannot reply to the customer.</span></div>${forceCloseControl}${managementForm}</div></section></div>`;
 }
 
 function renderAdminTicketManagement() {
-  const attentionTickets = getAdminAttentionTickets();
-  const attentionRows = renderAdminTicketRows(attentionTickets, true);
-  const allRows = renderAdminTicketRows(adminTickets);
+  const serverMode = serverSessionIsActive() && Boolean(state.serverData.adminManagement);
+  const management = state.serverData.adminManagement || {};
+  const attentionSourceCount = serverMode ? Number(management.attention_total ?? serverAdminAttentionTickets.length) : getAdminAttentionTickets().length;
+  const allSourceCount = serverMode ? Number(management.all_tickets_count ?? adminTickets.length) : adminTickets.length;
+  const attentionTickets = serverMode
+    ? serverAdminAttentionTickets.map((ticket) => ({ ticket, reason: getAdminTicketAttentionReason(ticket) }))
+    : sortAdminTicketRecords(getFilteredAdminAttentionTickets(), true);
+  const filteredTickets = serverMode ? adminTickets : sortAdminTicketRecords(getFilteredAdminTickets());
+  const attentionPagination = serverMode
+    ? {
+      rows: attentionTickets,
+      page: Number(management.attention_pagination?.page || state.adminAttentionPage || 1),
+      total: Number(management.attention_pagination?.total || attentionTickets.length),
+      totalPages: Number(management.attention_pagination?.total_pages || 1),
+    }
+    : paginateTableRows(attentionTickets, state.adminAttentionPage);
+  const allPagination = serverMode
+    ? {
+      rows: filteredTickets,
+      page: Number(management.all_pagination?.page || state.adminAllTicketsPage || 1),
+      total: Number(management.all_pagination?.total || filteredTickets.length),
+      totalPages: Number(management.all_pagination?.total_pages || 1),
+    }
+    : paginateTableRows(filteredTickets, state.adminAllTicketsPage);
+  const attentionRows = renderAdminTicketRows(attentionPagination.rows, true);
+  const allRows = renderAdminTicketRows(allPagination.rows);
+  const filterOptions = serverMode
+    ? {
+      queues: management.filter_options?.queues || adminFilterOptions().queues,
+      assignees: management.filter_options?.assignees || adminFilterOptions().assignees,
+    }
+    : adminFilterOptions();
+  const filterCount = Object.values(state.adminTicketFilters).filter((value) => value !== "all").length;
+  const filterSelect = (name, label, options) => `<label><span>${label}</span><select data-admin-ticket-filter="${name}" aria-label="Filter tickets by ${label.toLowerCase()}"><option value="all" ${state.adminTicketFilters[name] === "all" ? "selected" : ""}>All ${label.toLowerCase()}</option>${options.map((option) => `<option value="${escapeHtml(option)}" ${state.adminTicketFilters[name] === option ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
+  const adminFilters = state.adminTicketFiltersOpen ? `<div class="admin-ticket-filters" role="group" aria-label="Filter ticket management"><div class="admin-ticket-filter-grid">${filterSelect("model", "Models", ["Joint", "Separate"])}${filterSelect("type", "Ticket types", ["Incident", "Request", "Problem", "Change"])}${filterSelect("queue", "Queues", filterOptions.queues)}${filterSelect("priority", "Priorities", ["High", "Medium", "Low", "Unclassified"])}${filterSelect("status", "Statuses", ["Open", "In progress", "Resolved", "Reopened", "Closed"])}${filterSelect("assignee", "Assignees", filterOptions.assignees)}</div><button class="button text" type="button" data-action="clear-admin-ticket-filters">Clear filters</button></div>` : "";
+  const filteredAllCount = serverMode ? Number(management.filtered_all_count ?? allPagination.total) : filteredTickets.length;
+  const adminSearch = `<form id="admin-ticket-search-form" class="admin-ticket-searchbar"><label for="admin-ticket-search">Search tickets</label><div class="admin-ticket-search-input"><input id="admin-ticket-search" name="admin-ticket-search" type="search" value="${escapeHtml(state.adminTicketSearch)}" placeholder="Ticket ID, title, customer, queue, or assignee" /><button class="admin-ticket-search-clear" type="button" data-action="clear-admin-ticket-search" aria-label="Clear ticket search" ${state.adminTicketSearch ? "" : "disabled"}>×</button></div><button class="button secondary" type="submit">Search</button><button class="button secondary" type="button" data-action="toggle-admin-ticket-filters" aria-expanded="${state.adminTicketFiltersOpen}">${filterCount ? `Filters (${filterCount})` : "Filter tickets"}</button><span class="admin-ticket-result-count">Showing ${filteredAllCount} of ${allSourceCount} tickets</span></form>${adminFilters}`;
+  const attentionReference = renderAdminSortHeader("reference", "Reference");
+  const attentionHeaders = `${attentionReference}<th>Customer request</th>${renderAdminSortHeader("model", "Model")}${renderAdminSortHeader("queue", "Queue")}${renderAdminSortHeader("priority", "Priority")}${renderAdminSortHeader("status", "Status")}${renderAdminSortHeader("attention", "Attention reason")}<th><span class="sr-only">Actions</span></th>`;
+  const allHeaders = `${attentionReference}<th>Customer request</th>${renderAdminSortHeader("model", "Model")}${renderAdminSortHeader("queue", "Queue")}${renderAdminSortHeader("priority", "Priority")}${renderAdminSortHeader("status", "Status")}${renderAdminSortHeader("assignee", "Assignee")}${renderAdminSortHeader("updated", "Updated")}<th><span class="sr-only">Actions</span></th>`;
   return `
     <div class="page-heading"><div><span class="eyebrow">Administration</span><h1>Ticket management</h1><p>Review ticket details, correct routing, and assign ownership. Customer replies remain with support staff.</p></div></div>
     <section class="admin-ticket-management-note"><span aria-hidden="true">↳</span><span><strong>Admin controls affect ownership and routing only.</strong> Use the ticket dialog to reroute or reassign a ticket; staff handle every customer response.</span></section>
-    <section class="panel table-panel admin-ticket-table admin-management-attention"><div class="panel-head"><div><h2>Requires attention</h2><p>Routing failures and tickets that have passed their service deadline.</p></div><span class="performance-total">${attentionTickets.length} tickets</span></div><div class="admin-ticket-table-wrap"><table class="data-table"><thead><tr><th>Reference</th><th>Customer request</th><th>Model</th><th>Queue</th><th>Priority</th><th>Status</th><th>Attention reason</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${attentionRows}</tbody></table></div></section>
-    <section class="panel table-panel admin-ticket-table admin-ticket-directory"><div class="panel-head"><div><h2>All tickets</h2><p>Every ticket in the service desk, including reopened and high-priority work.</p></div><span class="performance-total">${adminTickets.length} tickets</span></div><div class="admin-ticket-table-wrap"><table class="data-table"><thead><tr><th>Reference</th><th>Customer request</th><th>Model</th><th>Queue</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${allRows}</tbody></table></div></section>
+    <section class="panel admin-ticket-controls">${adminSearch}</section>
+    <section class="panel table-panel admin-ticket-table admin-management-attention"><div class="panel-head"><div><h2>Requires attention</h2><p>Routing failures and tickets that have passed their service deadline.</p></div><span class="performance-total">${attentionTickets.length} of ${attentionSourceCount} tickets</span></div><div class="admin-ticket-table-wrap"><table class="data-table"><thead><tr>${attentionHeaders}</tr></thead><tbody>${attentionRows}</tbody></table></div>${renderTablePagination("paginate-admin-attention", attentionPagination, "tickets", "adminAttentionPage")}</section>
+    <section class="panel table-panel admin-ticket-table admin-ticket-directory"><div class="panel-head"><div><h2>All tickets</h2><p>Every ticket in the service desk, including reopened and high-priority work.</p></div><span class="performance-total">${filteredTickets.length} of ${allSourceCount} tickets</span></div><div class="admin-ticket-table-wrap"><table class="data-table"><thead><tr>${allHeaders}</tr></thead><tbody>${allRows}</tbody></table></div>${renderTablePagination("paginate-admin-all-tickets", allPagination, "tickets", "adminAllTicketsPage")}</section>
     ${state.adminTicketDialog ? renderAdminTicketDialog(state.adminTicketDialog) : ""}`;
 }
 
 function renderAdminActivity() {
   const isAuditHistory = state.adminActivityView === "audit";
   const normalizedQuery = state.auditQuery.trim().toLowerCase();
-  const matchingAuditRecords = auditLogRecords.filter((record) => {
+  const matchingAuditRecords = serverSessionIsActive()
+    ? auditLogRecords
+    : auditLogRecords.filter((record) => {
     const categoryMatches = state.auditCategory === "all" || record.category === state.auditCategory;
     const text = `${record.timestamp} ${record.actor} ${record.category} ${record.action} ${record.record} ${record.detail}`.toLowerCase();
     return categoryMatches && (!normalizedQuery || text.includes(normalizedQuery));
@@ -1041,7 +2791,7 @@ function renderAdminActivity() {
       <div class="audit-search-control"><label for="audit-query">Search audit history</label><div class="audit-search-input"><input id="audit-query" name="audit-query" type="text" value="${escapeHtml(state.auditQuery)}" placeholder="Ticket ID, user, event, or detail" /><button class="audit-search-clear" type="button" data-action="clear-audit-search" aria-label="Clear audit search" ${state.auditQuery ? "" : "disabled"}>×</button></div></div>
       <label><span>Event type</span><select data-audit-category aria-label="Filter audit history by event type"><option value="all" ${state.auditCategory === "all" ? "selected" : ""}>All event types</option><option value="Routing" ${state.auditCategory === "Routing" ? "selected" : ""}>Routing</option><option value="Ticket" ${state.auditCategory === "Ticket" ? "selected" : ""}>Ticket</option><option value="Model" ${state.auditCategory === "Model" ? "selected" : ""}>Model</option><option value="Access" ${state.auditCategory === "Access" ? "selected" : ""}>Access</option></select></label>
       <div class="audit-control-actions"><button class="button secondary" type="submit">Search</button><button class="button text" type="button" data-action="clear-audit-filters">Clear</button></div>
-      <span class="audit-result-count">Showing ${matchingAuditRecords.length} of ${auditLogRecords.length} records</span>
+      <span class="audit-result-count">Showing ${matchingAuditRecords.length} of ${serverSessionIsActive() ? Number(state.serverData.audit?.total || matchingAuditRecords.length) : auditLogRecords.length} records</span>
     </form>
     <div class="audit-table-wrap"><table class="data-table audit-table"><thead><tr><th>Timestamp</th><th>Actor</th><th>Type</th><th>Event</th><th>Record</th></tr></thead><tbody>${auditRows}</tbody></table></div>`;
   const activityFeed = `
@@ -1049,19 +2799,220 @@ function renderAdminActivity() {
       <section class="panel"><div class="panel-head"><div><h2>Operational activity</h2><p>High-signal events that may need an administrator's attention.</p></div><span class="performance-total">${adminActivityEvents.length} recent events</span></div><div class="admin-activity-list">${activityItems}</div></section>
     </div>`;
   return `
-    <div class="page-heading audit-page-heading"><div><span class="eyebrow">Administration</span><h1>Activity &amp; audit log</h1><p>Review operational signals now, then trace the full history behind each ticket, model, and account change.</p></div><div class="audit-retention"><strong>${auditLogRecords.length}</strong><span>records in this prototype</span></div></div>
+    <div class="page-heading audit-page-heading"><div><span class="eyebrow">Administration</span><h1>Activity &amp; audit log</h1><p>Review operational signals now, then trace the full history behind each ticket, model, and account change.</p></div><div class="audit-retention"><strong>${serverSessionIsActive() ? Number(state.serverData.audit?.total || auditLogRecords.length) : auditLogRecords.length}</strong><span>records available</span></div></div>
     <section class="audit-intro" aria-label="Switch activity and audit views"><button class="audit-intro-choice ${!isAuditHistory ? "active" : ""}" type="button" data-action="set-admin-activity-view" data-view="feed" aria-pressed="${!isAuditHistory}"><span class="eyebrow">Activity feed</span><span>Short, prioritised updates for day-to-day operations.</span></button><button class="audit-intro-choice ${isAuditHistory ? "active" : ""}" type="button" data-action="set-admin-activity-view" data-view="audit" aria-pressed="${isAuditHistory}"><span class="eyebrow">Audit history</span><span>A searchable record of who changed what, and when.</span></button></section>
     <section class="panel audit-workspace"><div class="tabs audit-tabs" role="tablist" aria-label="Activity and audit views"><button class="tab ${!isAuditHistory ? "active" : ""}" type="button" role="tab" aria-selected="${!isAuditHistory}" data-action="set-admin-activity-view" data-view="feed">Activity feed</button><button class="tab ${isAuditHistory ? "active" : ""}" type="button" role="tab" aria-selected="${isAuditHistory}" data-action="set-admin-activity-view" data-view="audit">Audit history</button></div>${isAuditHistory ? auditHistory : activityFeed}</section>`;
+}
+
+function getStaffUser(userId) {
+  return staffUsers.find((user) => user.id === userId);
+}
+
+function getFilteredStaffUsers() {
+  if (serverSessionIsActive()) return staffUsers;
+  return state.staffQueueFilter === "all"
+    ? staffUsers
+    : staffUsers.filter((user) => user.queue === state.staffQueueFilter);
+}
+
+function getQueueDashboardData() {
+  const serverQueues = state.serverData.queuesStaff?.queues;
+  if (serverSessionIsActive() && Array.isArray(serverQueues) && serverQueues.length) {
+    return serverQueues.map((metric) => ({
+      ...metric,
+      queue: metric.name,
+      staffCount: Number(metric.staff_count || 0),
+      highPriority: Number(metric.high_priority || 0),
+      sla: metric.period_sla_met_percent == null ? "—" : `${metric.period_sla_met_percent}%`,
+    }));
+  }
+  return queueDashboardMetrics.map((metric) => ({
+    ...metric,
+    staffCount: staffUsers.filter((user) => user.queue === metric.queue).length,
+  }));
+}
+
+function getAllQueuesSummary() {
+  const queues = getQueueDashboardData();
+  if (serverSessionIsActive() && queues.length) {
+    const serverSummary = queues.reduce((summary, queue) => {
+      const resolved = Number(queue.period_resolved || 0);
+      const breaches = Number(queue.period_sla_breaches || 0);
+      return {
+        backlog: summary.backlog + Number(queue.backlog || 0),
+        unassigned: summary.unassigned + Number(queue.unassigned || 0),
+        highPriority: summary.highPriority + Number(queue.highPriority || 0),
+        periodReceived: summary.periodReceived + Number(queue.period_received || 0),
+        periodResolved: summary.periodResolved + resolved,
+        periodSlaBreaches: summary.periodSlaBreaches + breaches,
+        metCount: summary.metCount + Math.max(0, resolved - breaches),
+      };
+    }, {
+      backlog: 0,
+      unassigned: 0,
+      highPriority: 0,
+      periodReceived: 0,
+      periodResolved: 0,
+      periodSlaBreaches: 0,
+      metCount: 0,
+    });
+    const periodSlaMet = serverSummary.periodResolved
+      ? Number(((serverSummary.metCount / serverSummary.periodResolved) * 100).toFixed(2))
+      : null;
+    return {
+      id: "all",
+      queue: "All queues",
+      backlog: serverSummary.backlog,
+      unassigned: serverSummary.unassigned,
+      highPriority: serverSummary.highPriority,
+      period_received: serverSummary.periodReceived,
+      period_resolved: serverSummary.periodResolved,
+      period_sla_breaches: serverSummary.periodSlaBreaches,
+      period_sla_met_percent: periodSlaMet,
+      queueCount: queues.length,
+      staffCount: Number(state.serverData.queuesStaff?.all_staff_count || staffUsers.length),
+    };
+  }
+  const total = queues.reduce((summary, queue) => ({
+    backlog: summary.backlog + queue.backlog,
+    unassigned: summary.unassigned + queue.unassigned,
+    highPriority: summary.highPriority + queue.highPriority,
+    weightedSla: summary.weightedSla + (Number.parseInt(queue.sla, 10) * queue.backlog),
+  }), { backlog: 0, unassigned: 0, highPriority: 0, weightedSla: 0 });
+  return {
+    ...total,
+    queueCount: queues.length,
+    staffCount: staffUsers.length,
+    sla: `${Math.round(total.weightedSla / total.backlog)}%`,
+  };
+}
+
+function getSelectedQueueMetrics() {
+  if (state.staffQueueFilter === "all") return getAllQueuesSummary();
+  return getQueueDashboardData().find((queue) => queue.queue === state.staffQueueFilter) || getAllQueuesSummary();
+}
+
+function getQueueDashboardPeriod() {
+  return queueDashboardPeriods.find((period) => period.key === state.queueDashboardPeriod) || queueDashboardPeriods[1];
+}
+
+function getOperationalQueueMetrics(queue, period) {
+  if (serverSessionIsActive() && queue?.id) {
+    const received = Number(queue.period_received || 0);
+    const resolved = Number(queue.period_resolved || 0);
+    return {
+      ...queue,
+      ticketsReceived: received,
+      ticketsResolved: resolved,
+      slaBreaches: Number(queue.period_sla_breaches || 0),
+      sla: queue.period_sla_met_percent == null ? "—" : `${queue.period_sla_met_percent}%`,
+    };
+  }
+  const receivedBase = (queue.backlog * 3) + (queue.unassigned * 2) + queue.highPriority;
+  const ticketsReceived = Math.round(receivedBase * period.factor);
+  const slaValue = Math.max(0, Math.min(100, Number.parseInt(queue.sla, 10) + period.slaOffset));
+  const slaBreaches = Math.round(ticketsReceived * ((100 - slaValue) / 100));
+  return {
+    ...queue,
+    ticketsReceived,
+    ticketsResolved: Math.max(0, ticketsReceived - slaBreaches),
+    slaBreaches,
+    sla: `${slaValue}%`,
+  };
+}
+
+function getQueueWorkloadTrend(metric, period) {
+  const variations = [0.84, 1.06, 0.93, 1.12, 0.97, 1.03, 1.08];
+  const average = metric.ticketsReceived / period.graphLabels.length;
+  return period.graphLabels.map((_, index) => Math.max(0, Math.round(average * variations[index])));
+}
+
+function staffStatusClass(status) {
+  return status.toLowerCase().replace(/[^a-z]+/g, "-");
+}
+
+function getStaffResolvedSummary(user) {
+  return user.resolved[state.staffUserResolvedPeriod] || user.resolved.month;
+}
+
+function getStaffPrioritySla(summary) {
+  if (summary?.slaByPriority) {
+    const valueFor = (key) => summary.slaByPriority[key]?.sla_met_percent;
+    return {
+      high: valueFor("high") == null ? "—" : `${valueFor("high")}%`,
+      medium: valueFor("medium") == null ? "—" : `${valueFor("medium")}%`,
+      low: valueFor("low") == null ? "—" : `${valueFor("low")}%`,
+    };
+  }
+  const overall = Number.parseInt(summary.sla, 10);
+  if (Number.isNaN(overall)) return { high: "—", medium: "—", low: "—" };
+  return {
+    high: `${Math.max(0, overall - 4)}%`,
+    medium: `${overall}%`,
+    low: `${Math.min(100, overall + 3)}%`,
+  };
+}
+
+function renderStaffUserDialog(userId) {
+  const isNew = userId === "new";
+  const user = isNew ? {
+    id: "new", firstName: "", lastName: "", email: "", phone: "", queue: "", title: "Support specialist",
+  } : getStaffUser(userId);
+  if (!user) return "";
+  const summary = !isNew ? getStaffResolvedSummary(user) : null;
+  const prioritySla = summary ? getStaffPrioritySla(summary) : null;
+  const periodControls = ["today", "week", "month"].map((period) => `<button class="metric-period-button${period === state.staffUserResolvedPeriod ? " active" : ""}" type="button" data-action="set-staff-user-resolved-period" data-period="${period}" aria-pressed="${period === state.staffUserResolvedPeriod}">${period === "today" ? "Today" : period === "week" ? "Week" : "Month"}</button>`).join("");
+  const queueNames = serverSessionIsActive() && state.serverData.queuesStaff?.queues?.length
+    ? state.serverData.queuesStaff.queues.map((queue) => queue.name)
+    : staffQueueOptions;
+  const queueOptions = [`<option value="">Select a queue</option>`, ...queueNames.map((queue) => `<option value="${escapeHtml(queue)}" ${user.queue === queue ? "selected" : ""}>${escapeHtml(queue)}</option>`)].join("");
+  const deleteControl = !isNew ? (state.staffDeleteConfirmId === user.id
+    ? `<div class="staff-delete-confirm"><strong>Deactivate ${escapeHtml(getProfileDisplayName(user))}?</strong><span>This prevents sign-in and removes the account from active queue assignment.</span><div><button class="button danger" type="button" data-action="confirm-delete-staff-user" data-staff-id="${user.id}">Deactivate staff member</button><button class="button secondary" type="button" data-action="cancel-staff-delete">Cancel</button></div></div>`
+    : `<button class="button danger staff-delete-button" type="button" data-action="delete-staff-user" data-staff-id="${user.id}">Deactivate staff member</button>`) : "";
+  const summaryPanel = isNew
+    ? `<aside class="staff-user-summary staff-user-summary-empty"><span class="eyebrow">Resolved work</span><h3>Performance appears after ticket activity</h3><p>Once this staff member resolves tickets, their Today, Week, and Month summaries will be available here.</p></aside>`
+    : `<aside class="staff-user-summary"><div class="staff-summary-head"><div><span class="eyebrow">Resolved work</span><h3>${escapeHtml(getProfileDisplayName(user))}</h3><p>Completed tickets for the selected period.</p></div><div class="metric-period-switcher staff-summary-periods" role="group" aria-label="Select staff resolved work period">${periodControls}</div></div><div class="staff-summary-metrics"><article><span class="eyebrow">Tickets resolved</span><strong>${summary.count}</strong><small>${state.staffUserResolvedPeriod === "today" ? "Today" : state.staffUserResolvedPeriod === "week" ? "This week" : "This month"}</small></article><section class="staff-sla-section"><div class="staff-overall-sla"><div><span class="eyebrow">Overall SLA met</span><strong>${summary.sla}</strong><small>Resolved within SLA</small></div><span class="staff-sla-caption">By priority</span></div><div class="staff-priority-sla-grid"><article class="high"><span>High</span><strong>${prioritySla.high}</strong></article><article class="medium"><span>Medium</span><strong>${prioritySla.medium}</strong></article><article class="low"><span>Low</span><strong>${prioritySla.low}</strong></article></div></section><article><span class="eyebrow">Average resolution</span><strong>${summary.time}</strong><small>Time to resolve</small></article></div><div class="staff-summary-activity"><span class="staff-status ${staffStatusClass(user.status)}"><i></i>${escapeHtml(user.status)}</span><span>${user.activeTickets} active ticket${user.activeTickets === 1 ? "" : "s"} · ${user.waitingReply} awaiting reply</span></div></aside>`;
+  const emailField = `<label>Work email<input name="staff-email" type="email" required value="${escapeHtml(user.email)}" ${isNew ? "" : "readonly"} /></label>`;
+  const passwordField = isNew && serverSessionIsActive() ? `<label>Temporary password<input name="staff-password" type="password" minlength="8" required placeholder="Set an initial sign-in password" /></label>` : "";
+  return `<div class="ticket-dialog-backdrop" data-action="close-staff-user" role="presentation"><section class="ticket-dialog staff-user-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-user-dialog-title"><header class="ticket-dialog-header staff-user-dialog-header"><div class="staff-dialog-person"><span class="staff-avatar large">${isNew ? "+" : escapeHtml(getProfileInitials(user))}</span><div><span class="eyebrow">${isNew ? "New staff member" : "Staff member"}</span><h2 id="staff-user-dialog-title">${isNew ? "Add staff member" : escapeHtml(getProfileDisplayName(user))}</h2><p>${isNew ? "Create an account and assign its first support queue." : `${escapeHtml(user.title)} · ${escapeHtml(user.queue)}`}</p></div></div><button class="dialog-close" type="button" data-action="close-staff-user" aria-label="Close staff details">×</button></header><div class="staff-user-dialog-body"><form id="staff-user-form" data-staff-id="${user.id}" class="staff-user-form"><div class="form-section-heading"><span class="eyebrow">Account and assignment</span><h3>${isNew ? "Staff details" : "Update staff details"}</h3><p>Update the staff profile and assign the queue where this member can work.</p></div><div class="profile-name-grid"><label>First name<input name="staff-first-name" required value="${escapeHtml(user.firstName)}" /></label><label>Last name<input name="staff-last-name" required value="${escapeHtml(user.lastName)}" /></label></div>${emailField}${passwordField}<label>Phone number<input name="staff-phone" type="tel" value="${escapeHtml(user.phone)}" /></label><label>Role title<input name="staff-title" required value="${escapeHtml(user.title)}" /></label><label>Assigned queue<select name="staff-queue" required>${queueOptions}</select></label><div class="form-actions"><button class="button signal" type="submit">${isNew ? "Create staff member" : "Save staff changes"}</button><button class="button secondary close-staff-user-button" type="button" data-action="close-staff-user">Cancel</button></div>${deleteControl}</form>${summaryPanel}</div></section></div>`;
+}
+
+function renderQueueDashboard() {
+  const period = getQueueDashboardPeriod();
+  const selected = getOperationalQueueMetrics(getSelectedQueueMetrics(), period);
+  const selectedQueueLabel = state.staffQueueFilter === "all" ? "All queues" : state.staffQueueFilter;
+  const queueNames = serverSessionIsActive() && state.serverData.queuesStaff?.queues?.length
+    ? state.serverData.queuesStaff.queues.map((queue) => queue.name)
+    : staffQueueOptions;
+  const queueOptions = [`<option value="all" ${state.staffQueueFilter === "all" ? "selected" : ""}>All queues</option>`, ...queueNames.map((queue) => `<option value="${escapeHtml(queue)}" ${state.staffQueueFilter === queue ? "selected" : ""}>${escapeHtml(queue)}</option>`)].join("");
+  const periodControls = queueDashboardPeriods.map((item) => `<button class="metric-period-button${item.key === period.key ? " active" : ""}" type="button" data-action="set-queue-dashboard-period" data-period="${item.key}" aria-pressed="${item.key === period.key}">${item.key === "week" ? "Week" : item.key === "month" ? "Month" : item.key === "quarter" ? "Quarter" : "Year"}</button>`).join("");
+  const trendValues = getQueueWorkloadTrend(selected, period);
+  const trendMaximum = Math.max(...trendValues, 1);
+  const pointStep = trendValues.length > 1 ? 210 / (trendValues.length - 1) : 0;
+  const trendPoints = trendValues.map((value, index) => `${18 + (index * pointStep)},${90 - Math.round((value / trendMaximum) * 60)}`).join(" ");
+  const trendArea = `18,90 ${trendPoints} 228,90`;
+  const staffCount = selected.staffCount ?? staffUsers.length;
+  const selectionDescription = state.staffQueueFilter === "all"
+    ? "A consolidated view of every support queue and the staff directory."
+    : `Business operations and assigned staff for ${selectedQueueLabel}.`;
+  return `<section class="queue-dashboard" aria-labelledby="queue-dashboard-title"><div class="queue-dashboard-head"><div><span class="eyebrow">Queue operations</span><h2 id="queue-dashboard-title">${escapeHtml(selectedQueueLabel)}</h2><p>${escapeHtml(selectionDescription)}</p></div><div class="queue-dashboard-controls"><label class="queue-dashboard-filter" for="queue-dashboard-filter"><span>Dashboard queue</span><select id="queue-dashboard-filter" aria-label="Dashboard queue" data-staff-queue-filter>${queueOptions}</select></label><div class="queue-period-control"><span>Reporting period</span><div class="metric-period-switcher" role="group" aria-label="Select queue dashboard reporting period">${periodControls}</div></div></div></div><section class="queue-kpi-grid" aria-label="Selected queue operational metrics"><article><span class="eyebrow">Tickets received</span><strong>${selected.ticketsReceived}</strong><small>${period.label}</small></article><article><span class="eyebrow">Tickets resolved</span><strong>${selected.ticketsResolved}</strong><small>${state.staffQueueFilter === "all" ? `${selected.queueCount} queues` : `${staffCount} staff assigned`}</small></article><article><span class="eyebrow">SLA breaches</span><strong>${selected.slaBreaches}</strong><small>Exceeded the target</small></article><article><span class="eyebrow">SLA met</span><strong>${selected.sla}</strong><small>Resolved within SLA</small></article></section><article class="queue-trend-panel queue-business-trend-panel"><div class="panel-head"><div><span class="eyebrow">Business operations graph</span><h3>Ticket intake · ${period.label}</h3></div><strong>${selected.ticketsReceived} received</strong></div><div class="queue-trend-chart"><svg viewBox="0 0 246 108" role="img" aria-label="Ticket intake trend for ${escapeHtml(selectedQueueLabel)} during ${escapeHtml(period.label)}"><line x1="18" y1="90" x2="228" y2="90"></line><line x1="18" y1="60" x2="228" y2="60"></line><line x1="18" y1="30" x2="228" y2="30"></line><polygon points="${trendArea}"></polygon><polyline points="${trendPoints}"></polyline>${trendValues.map((value, index) => `<circle cx="${18 + (index * pointStep)}" cy="${90 - Math.round((value / trendMaximum) * 60)}" r="3"></circle>`).join("")}</svg><div class="queue-trend-labels" style="grid-template-columns: repeat(${period.graphLabels.length}, 1fr);">${period.graphLabels.map((label) => `<span>${label}</span>`).join("")}</div></div></article></section>`;
+}
+
+function renderAdminUsers() {
+  const displayedUsers = getFilteredStaffUsers();
+  const cards = displayedUsers.length ? displayedUsers.map((user) => {
+    const resolvedMonth = user.resolved.month;
+    return `<article class="staff-card"><div class="staff-card-top"><span class="staff-avatar">${escapeHtml(getProfileInitials(user))}</span><div class="staff-card-identity"><h2>${escapeHtml(getProfileDisplayName(user))}</h2><p>${escapeHtml(user.title)}</p></div><span class="staff-status ${staffStatusClass(user.status)}"><i></i>${escapeHtml(user.status)}</span></div><div class="staff-card-queue"><span class="eyebrow">Assigned queue</span><strong>${escapeHtml(user.queue)}</strong></div><div class="staff-card-metrics"><div><span>Active</span><strong>${user.activeTickets}</strong></div><div><span>Reply needed</span><strong>${user.waitingReply}</strong></div><div><span>Resolved this month</span><strong>${resolvedMonth.count}</strong></div></div><div class="staff-card-footer"><span>${escapeHtml(user.email)}</span><button class="button secondary" type="button" data-action="view-staff-user" data-staff-id="${user.id}">View details</button></div></article>`;
+  }).join("") : `<div class="staff-directory-empty"><strong>No staff match this queue.</strong><p>Select another queue or choose All queues to view the full team.</p></div>`;
+  const selectedQueueLabel = state.staffQueueFilter === "all" ? "All queues" : state.staffQueueFilter;
+  return `<div class="page-heading staff-directory-heading"><div><span class="eyebrow">Administration</span><h1>Queues &amp; staff</h1><p>Monitor queue workload, then manage the people assigned to each support area.</p></div></div>${renderQueueDashboard()}<section class="staff-directory-section"><div class="staff-directory-section-head"><div><span class="eyebrow">Staff directory</span><h2>${escapeHtml(selectedQueueLabel)}</h2><p>Staff members assigned to the queue selected above.</p></div><div class="heading-actions"><button class="button signal" type="button" data-action="create-staff-user">Add staff member</button></div></div><section class="staff-directory-toolbar panel"><span class="staff-directory-selection">Selected in queue dashboard: <strong>${escapeHtml(selectedQueueLabel)}</strong></span><span class="staff-directory-count"><strong>${displayedUsers.length}</strong> of ${staffUsers.length} staff members</span></section><section class="staff-card-grid">${cards}</section></section>${state.staffUserDialog ? renderStaffUserDialog(state.staffUserDialog) : ""}`;
 }
 
 function renderAdmin() {
   if (state.page === "models") return renderModelCentre();
   if (state.page === "tickets") return renderAdminTicketManagement();
   if (state.page === "activity") return renderAdminActivity();
-  if (state.page === "users" || state.page === "queues") {
-    const label = state.page.charAt(0).toUpperCase() + state.page.slice(1);
-    return `<div class="page-heading"><div><span class="eyebrow">Administration</span><h1>${label}</h1><p>Manage the people and routing structure behind the service desk.</p></div><div class="heading-actions"><button class="button signal" data-action="placeholder">Add ${state.page === "users" ? "staff member" : "record"}</button></div></div><section class="empty-state"><div><strong>${label} workspace</strong><p>This prototype keeps the focus on the ticket and model workflows. In Django, this page will use the matching administration table and filters.</p></div></section>`;
-  }
+  if (state.page === "users" || state.page === "queues") return renderAdminUsers();
   const metrics = getAdminOverviewMetrics();
   const periodControls = adminOverviewPeriods.map((period) => `<button class="metric-period-button${period.key === metrics.period.key ? " active" : ""}" type="button" data-action="set-admin-overview-period" data-period="${period.key}" aria-pressed="${period.key === metrics.period.key}">${period.key === "day" ? "Day" : period.key === "week" ? "Week" : "Month"}</button>`).join("");
   const overduePeriod = getAdminOverduePeriod();
@@ -1069,41 +3020,119 @@ function renderAdmin() {
   const overdueTotal = Object.values(overduePeriod.counts).reduce((total, count) => total + count, 0);
   const overduePeriodControls = adminOverduePeriods.map((period) => `<button class="metric-period-button${period.key === overduePeriod.key ? " active" : ""}" type="button" data-action="set-admin-overdue-period" data-period="${period.key}" aria-pressed="${period.key === overduePeriod.key}">${period.key === "month" ? "Month" : period.key === "quarter" ? "Quarter" : "Year"}</button>`).join("");
   const activeModel = modelPerformance[state.activeModel];
-  const activeQueueF1 = activeModel.queueMetrics.find(([label]) => label === "Macro F1")[1];
-  const activePriorityAccuracy = activeModel.priorityMetrics.find(([label]) => label === "Holdout accuracy")[1];
+  const deployment = (state.serverData.deployments?.deployments || []).find((item) => item.family === state.activeModel);
+  const formatLiveScore = (deploymentValue, fallback) => {
+    if (!deployment) return fallback;
+    return deploymentValue == null ? "—" : `${(Number(deploymentValue) * 100).toFixed(2)}%`;
+  };
+  const activeQueueF1 = formatLiveScore(deployment?.live_queue_macro_f1, activeModel.queueMetrics.find(([label]) => label === "Macro F1")[1]);
+  const activePriorityF1 = formatLiveScore(deployment?.live_priority_macro_f1, activeModel.priorityMetrics.find(([label]) => label === "Macro F1")[1]);
   return `
-    <div class="page-heading"><div><span class="eyebrow">Operations command desk</span><h1>Route with evidence, not guesswork.</h1><p>Monitor the live ticket flow and the model decisions shaping each queue.</p></div><div class="heading-actions"><button class="button secondary" data-page="models">Model centre</button><button class="button signal" data-page="tickets">Review tickets</button></div></div>
-    <section class="model-banner"><div class="model-token">${activeModel.token}</div><div><strong>${activeModel.name} ${state.activeModel === "joint" ? "is" : "are"} routing new tickets</strong><p>Version ${activeModel.version} · Queue macro F1 ${activeQueueF1} · Priority accuracy ${activePriorityAccuracy}</p></div><div class="model-banner-actions"><span class="live-dot">LIVE</span><button class="button secondary" data-page="models">Manage model</button></div></section>
+    <div class="page-heading"><div><span class="eyebrow">Operations command desk</span><h1>Route with evidence, not guesswork.</h1><p>Monitor the live ticket flow and the model decisions shaping each queue.</p></div><div class="heading-actions"><button class="button secondary" data-page="users">User centre</button><button class="button signal" data-page="tickets">Review tickets</button></div></div>
+    <section class="model-banner"><div class="model-token">${activeModel.token}</div><div><strong>${activeModel.name} ${state.activeModel === "joint" ? "is" : "are"} routing new tickets</strong><p>Live queue macro F1 ${activeQueueF1} · Live priority macro F1 ${activePriorityF1}</p></div><div class="model-banner-actions"><span class="live-dot">LIVE</span><button class="button secondary" data-page="models">Manage model</button></div></section>
     <div class="admin-metric-period-bar"><span class="eyebrow">Metric period</span><div class="metric-period-switcher" role="group" aria-label="Select Admin overview metric period">${periodControls}</div></div>
     <section class="metric-grid"><article class="metric-card"><div class="metric-card-header"><span class="eyebrow">Tickets processed</span><span class="metric-period-label">${metrics.period.label}</span></div><strong class="metric-value">${metrics.ticketsProcessed}</strong><span class="metric-footer">Tickets routed in this period</span></article><article class="metric-card"><div class="metric-card-header"><span class="eyebrow">Open backlog</span><span class="metric-period-label">${metrics.period.label}</span></div><strong class="metric-value">${metrics.openBacklog}</strong><span class="metric-footer"><span class="trend warn">${metrics.highPriority}</span> High priority</span></article><article class="metric-card"><div class="metric-card-header"><span class="eyebrow">Route corrections</span><span class="metric-period-label">${metrics.period.label}</span></div><strong class="metric-value">${metrics.routeCorrectionRate.toFixed(1)}%</strong><span class="metric-footer">${metrics.routeCorrections} ticket${metrics.routeCorrections === 1 ? "" : "s"} rerouted</span></article><article class="metric-card"><span class="eyebrow">Routing failures</span><strong class="metric-value">${metrics.routingFailures}</strong><span class="metric-footer"><span class="trend warn">${metrics.overdue}</span> Overdue now</span></article></section>
-    <section class="two-column"><article class="panel overdue-queue-panel"><div class="panel-head"><div><h2>SLA breaches by queue</h2><p>Recorded tickets that exceeded their SLA in the selected period.</p></div><div class="overdue-panel-actions"><span class="performance-total">${overdueTotal} total</span><div class="metric-period-switcher" role="group" aria-label="Select SLA breach reporting period">${overduePeriodControls}</div></div></div><div class="panel-body"><div class="bar-list">${overdueQueueRows}</div></div></article><article class="panel"><div class="panel-head"><div><h2>Decision trail</h2><p>Events requiring an administrator’s attention.</p></div><button class="button text" data-page="activity">All activity</button></div><div class="panel-body"><div class="activity-list"><div class="activity-item"><span class="activity-dot signal"></span><div><strong>Three tickets need manual routing</strong><p>Classification failed before a queue could be assigned.</p><time>11:42 TODAY</time></div></div><div class="activity-item"><span class="activity-dot gold"></span><div><strong>Staff corrected a queue prediction</strong><p>TKT-000115 moved from Customer Service to Billing and Payments.</p><time>10:26 TODAY</time></div></div><div class="activity-item"><span class="activity-dot"></span><div><strong>Separate model dashboard updated</strong><p>Seven reviewed tickets were added to its live accuracy sample.</p><time>09:03 TODAY</time></div></div></div></div></article></section>
+     <section class="two-column"><article class="panel overdue-queue-panel"><div class="panel-head"><div><h2>SLA breaches by queue</h2><p>Recorded tickets that exceeded their SLA in the selected period.</p></div><div class="overdue-panel-actions"><span class="performance-total">${overdueTotal} total</span><div class="metric-period-switcher" role="group" aria-label="Select SLA breach reporting period">${overduePeriodControls}</div></div></div><div class="panel-body"><div class="bar-list">${overdueQueueRows}</div></div></article><article class="panel"><div class="panel-head"><div><h2>Decision trail</h2><p>Events requiring an administrator’s attention.</p></div><button class="button text" data-page="activity">All activity</button></div><div class="panel-body"><div class="activity-list">${adminActivityEvents.slice(0, 3).map((event) => `<div class="activity-item"><span class="activity-dot ${escapeHtml(event.tone || "")}"></span><div><strong>${escapeHtml(event.title)}</strong><p>${escapeHtml(event.detail)}</p><time>${escapeHtml(event.time)}</time></div></div>`).join("") || '<p class="table-empty">No recent operational events.</p>'}</div></div></article></section>
     ${renderAdminTicketTable()}`;
 }
 
 function renderAdminTicketTable() {
-  const attentionTickets = getAdminAttentionTickets();
-  const rows = renderAdminTicketRows(attentionTickets, true);
-  return `<section class="panel table-panel admin-attention-table"><div class="panel-head"><div><h2>Tickets requiring attention</h2><p>Routing failures and tickets that have passed their service deadline.</p></div><button class="button text" data-page="tickets">View all tickets</button></div><table class="data-table"><thead><tr><th>Reference</th><th>Customer request</th><th>Model</th><th>Queue</th><th>Priority</th><th>Status</th><th>Attention reason</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows}</tbody></table></section>`;
+  const serverOverview = state.serverData.adminOverview;
+  const attentionTickets = serverSessionIsActive() && serverOverview
+    ? (serverOverview.tickets_requiring_attention || []).map((ticket) => ({ ticket: normalizeServerTicket(ticket), reason: getAdminTicketAttentionReason(normalizeServerTicket(ticket)) }))
+    : getAdminAttentionTickets();
+  const recentAttentionTickets = attentionTickets
+    .slice()
+    .sort((left, right) => sortTicketsMostRecent(left.ticket, right.ticket))
+    .slice(0, TICKET_TABLE_PREVIEW_SIZE);
+  const rows = renderAdminTicketRows(recentAttentionTickets, true);
+  return `<section class="panel table-panel admin-attention-table"><div class="panel-head"><div><h2>Tickets requiring attention</h2><p>The five most recently updated routing failures and overdue tickets.</p></div><button class="button text" data-page="tickets">View all tickets</button></div><table class="data-table"><thead><tr><th>Reference</th><th>Customer request</th><th>Model</th><th>Queue</th><th>Priority</th><th>Status</th><th>Attention reason</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows}</tbody></table></section>`;
 }
 
 function renderModelCentre() {
   if (state.modelDashboard) return renderModelDashboard(state.modelDashboard);
   const joint = state.activeModel === "joint";
   const activeModel = modelPerformance[state.activeModel];
+  const deployments = state.serverData.deployments?.deployments || [];
+  const deploymentFor = (family) => deployments.find((item) => item.family === family);
+  const jointDeployment = deploymentFor("joint");
+  const separateDeployment = deploymentFor("separate");
+  const trainingScore = (deployment, key, fallback) => {
+    if (!serverSessionIsActive() || deployment?.[key] == null) return fallback;
+    return `${(Number(deployment[key]) * 100).toFixed(2)}%`;
+  };
+  const fallbackScore = (model, label) => model?.[label]?.find(([name]) => name === "Macro F1")?.[1] || "—";
+  const modelUpdate = (deployment, fallback) => {
+    const raw = deployment?.version || fallback;
+    if (!raw) return "Update date unavailable";
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) {
+      const stamp = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
+      return `Updated ${stamp}`;
+    }
+    return `Updated ${raw}`;
+  };
+  const reviewedCount = (deployment, fallback) => deployment?.live_reviewed_count == null ? fallback : Number(deployment.live_reviewed_count).toLocaleString("en-US");
+  const renderCompareScores = (deployment, model) => `<div class="compare-stats"><div><strong>${trainingScore(deployment, "queue_macro_f1", fallbackScore(model, "queueMetrics"))}</strong><small>Queue macro F1 · training</small></div><div><strong>${trainingScore(deployment, "priority_macro_f1", fallbackScore(model, "priorityMetrics"))}</strong><small>Priority macro F1 · training</small></div></div>`;
   return `
     <div class="page-heading"><div><span class="eyebrow">Model centre</span><h1>Choose the active fixed model.</h1><p>Switch which saved model routes future tickets. Both model artifacts remain unchanged after deployment.</p></div></div>
-    <section class="model-compare"><article class="compare-card ${joint ? "selected" : ""}"><span class="eyebrow">${joint ? "Active routing model" : "Fixed model"}</span><h3>Joint model</h3><p>One queue-and-priority prediction with type-aware routing.</p><strong class="compare-stat">79.49% <small>queue F1</small></strong><div class="form-actions"><button class="button ${joint ? "secondary" : "signal"}" data-action="activate-joint"${joint ? " disabled" : ""}>${joint ? "Currently active" : "Use Joint model"}</button><button class="button text" data-action="show-joint">Open dashboard</button></div></article><article class="compare-card ${!joint ? "selected" : ""}"><span class="eyebrow">${!joint ? "Active routing model" : "Fixed model"}</span><h3>Separate models</h3><p>Independent queue and priority pipelines with type-aware routing.</p><strong class="compare-stat">78.90% <small>queue F1</small></strong><div class="form-actions"><button class="button ${!joint ? "secondary" : "signal"}" data-action="activate-separate"${!joint ? " disabled" : ""}>${!joint ? "Currently active" : "Use Separate models"}</button><button class="button text" data-action="show-separate">Open dashboard</button></div></article></section>
-    <section class="model-centre-support"><article class="panel deployment-control-panel"><div class="panel-head"><div><h2>Deployment status</h2><p>Choose which fixed model receives new customer submissions.</p></div><span class="live-dot">LIVE</span></div><div class="panel-body"><dl class="deployment-facts"><div><dt>Routing new tickets</dt><dd>${activeModel.name}</dd></div><div><dt>Applies to</dt><dd>Future submissions only</dd></div><div><dt>Existing tickets</dt><dd>Keep their original prediction</dd></div><div><dt>Read-only model versions</dt><dd>Joint and Separate versions are read-only</dd></div></dl><div class="model-inspection-note"><span aria-hidden="true">↳</span><p><strong>Switching affects only new tickets.</strong> Administrators may choose Joint or Separate models, but this system does not retrain models or receive new model versions after go-live.</p></div></div></article><article class="panel model-register-panel"><div class="panel-head"><div><h2>Evidence register</h2><p>Evaluation records stay separate for a fair comparison.</p></div></div><div class="model-register-row model-register-head"><span>Model</span><span>Version</span><span>Reviewed</span><span>Status</span></div><div class="model-register-row"><strong>Joint</strong><span>2026.08.19</span><span>361 tickets</span><span class="register-status ${joint ? "active" : ""}">${joint ? "Active" : "Fixed"}</span></div><div class="model-register-row"><strong>Separate</strong><span>2026.08.18</span><span>214 tickets</span><span class="register-status ${!joint ? "active" : ""}">${!joint ? "Active" : "Fixed"}</span></div><div class="panel-footnote">Only staff-confirmed queue and priority outcomes are included in live evaluation.</div></article></section>`;
+     <section class="model-compare"><article class="compare-card ${joint ? "selected" : ""}"><span class="eyebrow">${joint ? "Active routing model" : "Fixed model"}</span><h3>Joint model</h3><p>One queue-and-priority prediction with type-aware routing.</p>${renderCompareScores(jointDeployment, modelPerformance.joint)}<div class="form-actions"><button class="button ${joint ? "secondary" : "signal"}" data-action="activate-joint"${joint ? " disabled" : ""}>${joint ? "Currently active" : "Use Joint model"}</button><button class="button text" data-action="show-joint">Open dashboard</button></div></article><article class="compare-card ${!joint ? "selected" : ""}"><span class="eyebrow">${!joint ? "Active routing model" : "Fixed model"}</span><h3>Separate models</h3><p>Independent queue and priority pipelines with type-aware routing.</p>${renderCompareScores(separateDeployment, modelPerformance.separate)}<div class="form-actions"><button class="button ${!joint ? "secondary" : "signal"}" data-action="activate-separate"${!joint ? " disabled" : ""}>${!joint ? "Currently active" : "Use Separate models"}</button><button class="button text" data-action="show-separate">Open dashboard</button></div></article></section>
+    <section class="model-centre-support"><article class="panel deployment-control-panel"><div class="panel-head"><div><h2>Deployment status</h2><p>Choose which fixed model receives new customer submissions.</p></div><span class="live-dot">LIVE</span></div><div class="panel-body"><dl class="deployment-facts"><div><dt>Routing new tickets</dt><dd>${activeModel.name}</dd></div><div><dt>Applies to</dt><dd>Future submissions only</dd></div><div><dt>Existing tickets</dt><dd>Keep their original prediction</dd></div><div><dt>Read-only artifacts</dt><dd>Joint and Separate artifacts are read-only</dd></div></dl><div class="model-inspection-note"><span aria-hidden="true">↳</span><p><strong>Switching affects only new tickets.</strong> Administrators may choose Joint or Separate models, but this system does not retrain models or receive new artifacts after go-live.</p></div></div></article><article class="panel model-register-panel"><div class="panel-head"><div><h2>Evidence register</h2><p>Evaluation records stay separate for a fair comparison.</p></div></div><div class="model-register-row model-register-head"><span>Model</span><span>Updated</span><span>Reviewed</span><span>Status</span></div><div class="model-register-row"><strong>Joint</strong><span>${escapeHtml(modelUpdate(jointDeployment, modelPerformance.joint.version))}</span><span>${reviewedCount(jointDeployment, modelPerformance.joint.reviewed)} tickets</span><span class="register-status ${joint ? "active" : ""}">${joint ? "Active" : "Fixed"}</span></div><div class="model-register-row"><strong>Separate</strong><span>${escapeHtml(modelUpdate(separateDeployment, modelPerformance.separate.version))}</span><span>${reviewedCount(separateDeployment, modelPerformance.separate.reviewed)} tickets</span><span class="register-status ${!joint ? "active" : ""}">${!joint ? "Active" : "Fixed"}</span></div><div class="panel-footnote">Only tickets that reached closed status are included in live macro-F1 evaluation.</div></article></section>`;
 }
 
 function renderModelMetricRows(metrics) {
   return metrics.map(([label, value]) => `<div class="model-metric-row"><span>${label}</span><strong>${value}</strong></div>`).join("");
 }
 
+function getServerModelOperationalData(modelKey, periodKey) {
+  if (!serverSessionIsActive()) return null;
+  const data = state.serverData.modelOperational;
+  if (!data || data.family !== modelKey || data.period !== periodKey) return null;
+  const formatAccuracy = (value) => value == null ? "—" : `${(Number(value) * 100).toFixed(2)}%`;
+  return {
+    total: Number(data.total || 0),
+    reviewed: Number(data.reviewed_count || 0),
+    queuePredictions: (data.queue_predictions || []).map((item) => [item.queue || "Unclassified", Number(item.count || 0)]),
+    priorityPredictions: (data.priority_predictions || []).map((item) => [item.priority || "Unclassified", Number(item.count || 0)]),
+    queueAccuracy: formatAccuracy(data.queue_accuracy),
+    priorityAccuracy: formatAccuracy(data.priority_accuracy),
+    queueMacroF1: formatAccuracy(data.queue_macro_f1),
+    priorityMacroF1: formatAccuracy(data.priority_macro_f1),
+    queueWrongCount: Number(data.queue_wrong_count || 0),
+    priorityWrongCount: Number(data.priority_wrong_count || 0),
+    version: data.version || "",
+  };
+}
+
 function renderModelDashboard(modelKey) {
   const model = modelPerformance[modelKey];
   const isActive = state.activeModel === modelKey;
-  const operationalPeriod = model.operationalPeriods[state.modelOperationalPeriod] || model.operationalPeriods.month;
+  const serverOperational = getServerModelOperationalData(modelKey, state.modelOperationalPeriod);
+  const operationalPeriod = serverOperational
+    ? { label: state.modelOperationalPeriod === "month" ? "Month" : state.modelOperationalPeriod === "quarter" ? "Quarter" : "Year", queuePredictions: serverOperational.queuePredictions, priorityPredictions: serverOperational.priorityPredictions }
+    : model.operationalPeriods[state.modelOperationalPeriod] || model.operationalPeriods.month;
+  const displayedModel = serverOperational
+    ? { ...model, processed: serverOperational.total, reviewed: serverOperational.reviewed, queueMacroF1: serverOperational.queueMacroF1, priorityMacroF1: serverOperational.priorityMacroF1 }
+    : { ...model, queueMacroF1: model.queueMetrics.find(([label]) => label === "Macro F1")?.[1] || "—", priorityMacroF1: model.priorityMetrics.find(([label]) => label === "Macro F1")?.[1] || "—" };
+  const liveRate = (wrongCount) => serverOperational?.reviewed
+    ? `${((wrongCount / serverOperational.reviewed) * 100).toFixed(1)}%`
+    : "—";
+  const evaluationMetrics = serverOperational
+    ? {
+      queue: [
+        ["Live accuracy", serverOperational.queueAccuracy],
+        ["Live macro F1", serverOperational.queueMacroF1],
+        ["Reviewed outcomes", serverOperational.reviewed.toLocaleString("en-US")],
+        ["Correction rate", liveRate(serverOperational.queueWrongCount)],
+      ],
+      priority: [
+        ["Live accuracy", serverOperational.priorityAccuracy],
+        ["Live macro F1", serverOperational.priorityMacroF1],
+        ["Reviewed outcomes", serverOperational.reviewed.toLocaleString("en-US")],
+        ["Correction rate", liveRate(serverOperational.priorityWrongCount)],
+      ],
+    }
+    : { queue: model.queueMetrics, priority: model.priorityMetrics };
   const totalPredictions = operationalPeriod.priorityPredictions.reduce((total, [, count]) => total + count, 0);
   const largestQueue = Math.max(...operationalPeriod.queuePredictions.map(([, count]) => count), 1);
   const queuePredictions = operationalPeriod.queuePredictions.map(([label, count]) => {
@@ -1117,10 +3146,10 @@ function renderModelDashboard(modelKey) {
   }).join("");
   const operationalPeriodControls = ["month", "quarter", "year"].map((period) => `<button class="metric-period-button${period === state.modelOperationalPeriod ? " active" : ""}" type="button" data-action="set-model-operational-period" data-period="${period}" aria-pressed="${period === state.modelOperationalPeriod}">${period === "month" ? "Month" : period === "quarter" ? "Quarter" : "Year"}</button>`).join("");
   return `
-    <div class="model-dashboard-back"><button class="button text model-back-button" type="button" data-action="back-model-centre"><span aria-hidden="true">←</span> Back to Model centre</button></div>
-    <div class="page-heading model-dashboard-heading"><div><span class="eyebrow">Model centre / Performance dashboard</span><h1>${model.name}</h1><p>${model.description}</p></div><div class="model-dashboard-identity"><span class="model-token">${model.token}</span><div><span class="${isActive ? "live-dot" : "availability-label"}">${isActive ? "Routing new tickets" : "Fixed model"}</span><small>Version ${model.version}</small></div></div></div>
-    <section class="metric-grid model-dashboard-metrics"><article class="metric-card"><span class="eyebrow">Processed by model</span><strong class="metric-value">${model.processed}</strong><span class="metric-footer">Tickets retain their model version</span></article><article class="metric-card"><span class="eyebrow">Reviewed outcomes</span><strong class="metric-value">${model.reviewed}</strong><span class="metric-footer">Staff-confirmed evaluation sample</span></article><article class="metric-card"><span class="eyebrow">Live queue accuracy</span><strong class="metric-value">${model.queueAccuracy}</strong><span class="metric-footer">Confirmed queue outcomes</span></article><article class="metric-card"><span class="eyebrow">Live priority accuracy</span><strong class="metric-value">${model.priorityAccuracy}</strong><span class="metric-footer">Confirmed priority outcomes</span></article></section>
-    <section class="model-evaluation-grid"><article class="panel model-evaluation-panel"><div class="panel-head"><div><span class="eyebrow">Routing task</span><h2>Queue prediction</h2><p>Evaluation metrics for assigning the support queue.</p></div></div><div class="model-metric-list">${renderModelMetricRows(model.queueMetrics)}</div></article><article class="panel model-evaluation-panel"><div class="panel-head"><div><span class="eyebrow">Urgency task</span><h2>Priority prediction</h2><p>Evaluation metrics for low, medium, and high priority.</p></div></div><div class="model-metric-list">${renderModelMetricRows(model.priorityMetrics)}</div></article></section>
+     <div class="model-dashboard-back"><button class="button text model-back-button" type="button" data-action="back-model-centre"><span aria-hidden="true">←</span> Back to Model centre</button></div>
+     <div class="page-heading model-dashboard-heading"><div><span class="eyebrow">Model centre / Performance dashboard</span><h1>${displayedModel.name}</h1><p>${displayedModel.description}</p></div><div class="model-dashboard-identity"><span class="model-token">${displayedModel.token}</span><div><span class="${isActive ? "live-dot" : "availability-label"}">${isActive ? "Routing new tickets" : "Fixed model"}</span></div></div></div>
+     <section class="metric-grid model-dashboard-metrics"><article class="metric-card"><span class="eyebrow">Processed by model</span><strong class="metric-value">${displayedModel.processed}</strong><span class="metric-footer">Recorded ticket predictions</span></article><article class="metric-card"><span class="eyebrow">Reviewed outcomes</span><strong class="metric-value">${displayedModel.reviewed}</strong><span class="metric-footer">Closed tickets in selected period</span></article><article class="metric-card"><span class="eyebrow">Live queue macro F1</span><strong class="metric-value">${displayedModel.queueMacroF1}</strong><span class="metric-footer">Final queue versus original prediction</span></article><article class="metric-card"><span class="eyebrow">Live priority macro F1</span><strong class="metric-value">${displayedModel.priorityMacroF1}</strong><span class="metric-footer">Final priority versus original prediction</span></article></section>
+     <section class="model-evaluation-grid"><article class="panel model-evaluation-panel"><div class="panel-head"><div><span class="eyebrow">${serverOperational ? "Live routing task" : "Routing task"}</span><h2>Queue prediction</h2><p>${serverOperational ? "Dynamic outcomes from closed tickets attributed to this model." : "Training evaluation for assigning the support queue."}</p></div></div><div class="model-metric-list">${renderModelMetricRows(evaluationMetrics.queue)}</div></article><article class="panel model-evaluation-panel"><div class="panel-head"><div><span class="eyebrow">${serverOperational ? "Live urgency task" : "Urgency task"}</span><h2>Priority prediction</h2><p>${serverOperational ? "Dynamic outcomes from closed tickets attributed to this model." : "Training evaluation for low, medium, and high priority."}</p></div></div><div class="model-metric-list">${renderModelMetricRows(evaluationMetrics.priority)}</div></article></section>
     <div class="model-operational-period-bar"><div><span class="eyebrow">Operational reporting period</span><p>${operationalPeriod.label} prediction records for this model.</p></div><div class="metric-period-switcher" role="group" aria-label="Select operational reporting period">${operationalPeriodControls}</div></div>
     <section class="model-operational-grid"><article class="panel queue-volume-panel"><div class="panel-head"><div><span class="eyebrow">Operational distribution</span><h2>Tickets predicted by queue</h2><p>Tickets routed during the selected period, grouped by predicted destination.</p></div><span class="performance-total">${totalPredictions.toLocaleString("en-US")} total</span></div><div class="panel-body"><div class="prediction-volume-list">${queuePredictions}</div></div></article><article class="panel priority-volume-panel"><div class="panel-head"><div><span class="eyebrow">Operational distribution</span><h2>Tickets predicted by priority</h2><p>Tickets routed during the selected period, grouped by predicted urgency.</p></div><span class="performance-total">${totalPredictions.toLocaleString("en-US")} total</span></div><div class="priority-volume-list">${priorityPredictions}</div><div class="panel-footnote">Counts represent the model’s recorded predictions in the selected period, not the original training dataset.</div></article></section>`;
 }
@@ -1136,7 +3165,17 @@ document.addEventListener("click", (event) => {
   if (pageButton) {
     state.page = pageButton.dataset.page;
     state.modelDashboard = null;
-    if (state.page === "new-ticket") state.activeDraftId = null;
+    if (state.page === "tickets") {
+      state.customerTicketsPage = 1;
+      state.adminAttentionPage = 1;
+      state.adminAllTicketsPage = 1;
+    }
+    if (state.page === "assigned") state.staffMyTicketsPage = 1;
+    if (state.page === "unassigned") state.staffTicketPoolPage = 1;
+    if (state.page === "new-ticket") {
+      state.activeDraftId = null;
+      state.emptyDraftPrompt = false;
+    }
     if (state.page !== "tickets") {
       state.customerTicketDialog = null;
       state.adminTicketDialog = null;
@@ -1144,6 +3183,7 @@ document.addEventListener("click", (event) => {
     if (state.page === "tickets" && state.role === "admin") state.adminTicketDialog = null;
     if (state.page !== "assigned") state.staffTicketDialog = null;
     render();
+    refreshAfterPageNavigation();
     return;
   }
   const action = event.target.closest("[data-action]")?.dataset.action;
@@ -1155,8 +3195,10 @@ document.addEventListener("click", (event) => {
     state.staffTicketDialog = null;
     state.adminTicketDialog = null;
     state.activeDraftId = null;
+    state.emptyDraftPrompt = false;
     state.page = "dashboard";
     render();
+    refreshAfterPageNavigation();
     return;
   }
   if (action === "toggle-account-menu") {
@@ -1176,15 +3218,19 @@ document.addEventListener("click", (event) => {
     state.page = state.accountReturnPage || "dashboard";
     state.accountReturnPage = "dashboard";
     render();
+    refreshAfterPageNavigation();
     return;
   }
   if (action === "log-out") {
     state.accountMenuOpen = false;
-    renderAccountMenu();
-    showToast("Log out will end the authenticated Django session.");
+    logOutOfServerSession();
     return;
   }
-  if (action === "new-ticket") { state.activeDraftId = null; state.page = "new-ticket"; render(); return; }
+  if (action === "forgot-password") {
+    showToast("Password recovery will be provided by the Django account service.");
+    return;
+  }
+  if (action === "new-ticket") { state.activeDraftId = null; state.customerFormRequestKey = createCustomerRequestKey(); state.emptyDraftPrompt = false; state.page = "new-ticket"; render(); return; }
   if (action === "view-customer-ticket") {
     openCustomerTicket(event.target.closest("[data-ticket-id]").dataset.ticketId);
     return;
@@ -1193,46 +3239,66 @@ document.addEventListener("click", (event) => {
     openStaffTicket(event.target.closest("[data-ticket-id]").dataset.ticketId);
     return;
   }
-  if (action === "review-closed-staff-ticket") {
-    openClosedStaffTicket(event.target.closest("[data-ticket-id]").dataset.ticketId);
-    return;
-  }
   if (action === "continue-draft") {
     continueCustomerDraft(event.target.closest("[data-draft-id]").dataset.draftId);
     return;
   }
   if (action === "discard-draft") {
     const draftId = event.target.closest("[data-draft-id]").dataset.draftId;
+    if (serverSessionIsActive()) {
+      void discardCustomerDraft(draftId);
+      return;
+    }
     state.discardedDraftIds.add(draftId);
     if (state.activeDraftId === draftId) state.activeDraftId = null;
+    state.emptyDraftPrompt = false;
     render();
     showToast(`${draftId} was discarded.`);
     return;
   }
   if (action === "mark-customer-resolved") {
     const ticketId = event.target.closest("[data-ticket-id]").dataset.ticketId;
-    state.pendingClosureTicketIds.add(ticketId);
-    state.customerResolutionDates.set(ticketId, PROTOTYPE_TODAY.toISOString());
+    if (serverSessionIsActive()) {
+      void markCustomerTicketResolved(ticketId);
+      return;
+    }
+    markTicketResolved(ticketId);
     render();
     showToast(`${ticketId} will close automatically after three days unless reopened.`);
     return;
   }
   if (action === "reopen-customer-ticket") {
     const ticketId = event.target.closest("[data-ticket-id]").dataset.ticketId;
+    if (serverSessionIsActive()) {
+      void reopenCustomerTicket(ticketId);
+      return;
+    }
     state.pendingClosureTicketIds.delete(ticketId);
     state.customerResolutionDates.delete(ticketId);
+    state.automaticallyResolvedTicketIds.delete(ticketId);
+    setTicketStatus(ticketId, "Reopened", "waiting", {
+      updated: "Reopened by customer",
+      updatedDetail: "Waiting for support reply",
+    });
     render();
     showToast(`${ticketId} was reopened and returned to the support team.`);
     return;
   }
   if (action === "close-customer-ticket") {
-    state.customerTicketDialog = null;
-    render();
+    closeActiveDialog("customerTicketDialog");
     return;
   }
   if (action === "close-staff-ticket") {
-    state.staffTicketDialog = null;
-    render();
+    closeActiveDialog("staffTicketDialog");
+    return;
+  }
+  if (action === "reroute-staff-ticket") {
+    const ticketId = event.target.closest("[data-ticket-id]").dataset.ticketId;
+    if (serverSessionIsActive()) {
+      void rerouteServerTicket(ticketId);
+      return;
+    }
+    rerouteStaffTicketToAdmin(ticketId);
     return;
   }
   if (action === "manage-admin-ticket") {
@@ -1240,8 +3306,76 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (action === "close-admin-ticket") {
-    state.adminTicketDialog = null;
+    closeActiveDialog("adminTicketDialog");
+    return;
+  }
+  if (action === "create-staff-user") {
+    state.staffUserDialog = "new";
+    state.staffDeleteConfirmId = null;
+    state.staffUserResolvedPeriod = "month";
     render();
+    return;
+  }
+  if (action === "set-staff-queue-dashboard") {
+    state.staffQueueFilter = event.target.closest("[data-queue]").dataset.queue;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (action === "set-queue-dashboard-period") {
+    state.queueDashboardPeriod = event.target.closest("[data-period]").dataset.period;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (action === "view-staff-user") {
+    state.staffUserDialog = event.target.closest("[data-staff-id]").dataset.staffId;
+    state.staffDeleteConfirmId = null;
+    state.staffUserResolvedPeriod = "month";
+    render();
+    if (serverSessionIsActive()) void loadServerStaffSummary(state.staffUserDialog, state.staffUserResolvedPeriod).then(() => render());
+    return;
+  }
+  if (action === "close-staff-user") {
+    if (event.target.closest(".staff-user-dialog") && !event.target.closest(".dialog-close, .close-staff-user-button")) return;
+    closeActiveDialog("staffUserDialog");
+    return;
+  }
+  if (action === "set-staff-user-resolved-period") {
+    state.staffUserResolvedPeriod = event.target.closest("[data-period]").dataset.period;
+    if (serverSessionIsActive() && state.staffUserDialog !== "new") {
+      void loadServerStaffSummary(state.staffUserDialog, state.staffUserResolvedPeriod).then(() => render());
+    } else render();
+    return;
+  }
+  if (action === "delete-staff-user") {
+    state.staffDeleteConfirmId = event.target.closest("[data-staff-id]").dataset.staffId;
+    render();
+    return;
+  }
+  if (action === "cancel-staff-delete") {
+    state.staffDeleteConfirmId = null;
+    render();
+    return;
+  }
+  if (action === "confirm-delete-staff-user") {
+    const userId = event.target.closest("[data-staff-id]").dataset.staffId;
+    if (serverSessionIsActive()) {
+      if (window.confirm("Deactivate this staff account? It will no longer be able to sign in or receive new tickets.")) void deactivateServerStaffUser(userId);
+      return;
+    }
+    const index = staffUsers.findIndex((user) => user.id === userId);
+    if (index === -1) {
+      showToast("That staff member is no longer available.");
+      return;
+    }
+    const [removedUser] = staffUsers.splice(index, 1);
+    const assignmentIndex = assignmentStaffUsers.findIndex((user) => user.id === userId);
+    if (assignmentIndex !== -1) assignmentStaffUsers.splice(assignmentIndex, 1);
+    state.staffUserDialog = null;
+    state.staffDeleteConfirmId = null;
+    render();
+    showToast(`${getProfileDisplayName(removedUser)} was removed from the staff directory.`);
     return;
   }
   if (action === "set-admin-activity-view") {
@@ -1251,47 +3385,107 @@ document.addEventListener("click", (event) => {
   }
   if (action === "set-admin-overview-period") {
     state.adminOverviewPeriod = event.target.closest("[data-period]").dataset.period;
-    render();
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "set-admin-overdue-period") {
     state.adminOverduePeriod = event.target.closest("[data-period]").dataset.period;
-    render();
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "clear-audit-filters") {
     state.auditQuery = "";
     state.auditCategory = "all";
-    render();
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "clear-audit-search") {
     state.auditQuery = "";
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (action === "keep-empty-draft") {
+    state.emptyDraftPrompt = false;
     render();
     return;
   }
-  if (action === "save-draft") { showToast(state.activeDraftId ? "Draft changes saved. It has not been sent for routing." : "Draft saved. It has not been sent for routing."); return; }
+  if (action === "discard-empty-draft") {
+    const draftId = state.activeDraftId;
+    if (draftId) state.discardedDraftIds.add(draftId);
+    state.activeDraftId = null;
+    state.emptyDraftPrompt = false;
+    state.page = "tickets";
+    render();
+    showToast(draftId ? `${draftId} was discarded.` : "Empty ticket discarded.");
+    return;
+  }
+  if (action === "save-draft") {
+    const form = event.target.closest("#ticket-form");
+    if (!form) return;
+    const values = getTicketFormValues(form);
+    if (!values.subject && !values.body && !values.issueChoice) {
+      state.emptyDraftPrompt = true;
+      render();
+      return;
+    }
+    saveCustomerDraft(form);
+    return;
+  }
   if (action === "cycle-staff-resolved-period") {
     const currentIndex = staffResolvedPeriods.findIndex((period) => period.key === state.staffResolvedPeriod);
     state.staffResolvedPeriod = staffResolvedPeriods[(currentIndex + 1) % staffResolvedPeriods.length].key;
-    render();
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "set-staff-performance-period") {
     state.staffPerformancePeriod = event.target.closest("[data-period]").dataset.period;
-    state.closedTicketsPage = 1;
-    render();
+    state.staffPerformancePage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
-  if (action === "previous-closed-tickets") {
-    state.closedTicketsPage = Math.max(1, state.closedTicketsPage - 1);
-    render();
+  if (action === "staff-performance-page") {
+    const direction = event.target.closest("[data-direction]").dataset.direction;
+    const currentPage = Number(state.serverData.staffPerformance?.page || state.staffPerformancePage || 1);
+    const totalPages = Math.max(1, Math.ceil(Number(state.serverData.staffPerformance?.total || 0) / Number(state.serverData.staffPerformance?.page_size || 5)));
+    state.staffPerformancePage = Math.max(1, Math.min(totalPages, currentPage + (direction === "next" ? 1 : -1)));
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
-  if (action === "next-closed-tickets") {
-    const closedTicketPageCount = Math.max(1, Math.ceil(getClosedStaffTickets().length / CLOSED_TICKETS_PAGE_SIZE));
-    state.closedTicketsPage = Math.min(closedTicketPageCount, state.closedTicketsPage + 1);
-    render();
+  if (action === "paginate-customer-tickets") {
+    const direction = event.target.closest("[data-direction]").dataset.direction;
+    if (serverSessionIsActive()) { moveServerTablePage(action, direction); void refreshServerData(); }
+    else { moveTablePage("customerTicketsPage", direction, getTableTotalForAction(action)); render(); }
+    return;
+  }
+  if (action === "paginate-staff-ticket-pool") {
+    const direction = event.target.closest("[data-direction]").dataset.direction;
+    if (serverSessionIsActive()) { moveServerTablePage(action, direction); void refreshServerData(); }
+    else { moveTablePage("staffTicketPoolPage", direction, getTableTotalForAction(action)); render(); }
+    return;
+  }
+  if (action === "paginate-staff-my-tickets") {
+    const direction = event.target.closest("[data-direction]").dataset.direction;
+    if (serverSessionIsActive()) { moveServerTablePage(action, direction); void refreshServerData(); }
+    else { moveTablePage("staffMyTicketsPage", direction, getTableTotalForAction(action)); render(); }
+    return;
+  }
+  if (action === "paginate-admin-attention") {
+    const direction = event.target.closest("[data-direction]").dataset.direction;
+    if (serverSessionIsActive()) { moveServerTablePage(action, direction); void refreshServerData(); }
+    else { moveTablePage("adminAttentionPage", direction, getTableTotalForAction(action)); render(); }
+    return;
+  }
+  if (action === "paginate-admin-all-tickets") {
+    const direction = event.target.closest("[data-direction]").dataset.direction;
+    if (serverSessionIsActive()) { moveServerTablePage(action, direction); void refreshServerData(); }
+    else { moveTablePage("adminAllTicketsPage", direction, getTableTotalForAction(action)); render(); }
     return;
   }
   if (action === "toggle-ticket-pool-filters") {
@@ -1301,7 +3495,9 @@ document.addEventListener("click", (event) => {
   }
   if (action === "clear-ticket-pool-filters") {
     state.ticketPoolFilters = { priority: "all", type: "all" };
-    render();
+    state.staffTicketPoolPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "toggle-my-tickets-filters") {
@@ -1311,7 +3507,52 @@ document.addEventListener("click", (event) => {
   }
   if (action === "clear-my-tickets-filters") {
     state.myTicketsFilters = { priority: "all", status: "all" };
+    state.staffMyTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (action === "toggle-admin-ticket-filters") {
+    state.adminTicketFiltersOpen = !state.adminTicketFiltersOpen;
     render();
+    return;
+  }
+  if (action === "clear-admin-ticket-filters") {
+    state.adminTicketFilters = { model: "all", type: "all", queue: "all", priority: "all", status: "all", assignee: "all" };
+    state.adminAttentionPage = 1;
+    state.adminAllTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (action === "clear-admin-ticket-search") {
+    state.adminTicketSearch = "";
+    state.adminAttentionPage = 1;
+    state.adminAllTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (action === "clear-staff-my-tickets-search") {
+    state.myTicketsSearch = "";
+    state.staffMyTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (action === "sort-admin-tickets") {
+    const sortKey = event.target.closest("[data-sort-key]").dataset.sortKey;
+    const defaultDirection = ["priority", "updated"].includes(sortKey) ? "desc" : "asc";
+    state.adminTicketSort = {
+      key: sortKey,
+      direction: state.adminTicketSort.key === sortKey
+        ? (state.adminTicketSort.direction === "asc" ? "desc" : "asc")
+        : defaultDirection,
+    };
+    state.adminAttentionPage = 1;
+    state.adminAllTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "sort-ticket-pool") {
@@ -1323,7 +3564,9 @@ document.addEventListener("click", (event) => {
         ? (state.ticketPoolSort.direction === "asc" ? "desc" : "asc")
         : defaultDirection,
     };
-    render();
+    state.staffTicketPoolPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "sort-my-tickets") {
@@ -1335,11 +3578,17 @@ document.addEventListener("click", (event) => {
         ? (state.myTicketsSort.direction === "asc" ? "desc" : "asc")
         : defaultDirection,
     };
-    render();
+    state.staffMyTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (action === "claim") {
     const ticketId = event.target.closest("[data-ticket-id]").dataset.ticketId;
+    if (serverSessionIsActive()) {
+      void claimServerTicket(ticketId);
+      return;
+    }
     state.claimedTicketAssignments.set(ticketId, getActiveProfile().id);
     render();
     showToast(`${ticketId} was claimed and moved to My tickets.`);
@@ -1347,26 +3596,59 @@ document.addEventListener("click", (event) => {
   }
   if (action === "filter") { showToast("Filters will apply to the ticket queryset in Django."); return; }
   if (action === "placeholder") { showToast("This management table will be connected during Django implementation."); return; }
-  if (action === "activate-joint") { state.activeModel = "joint"; render(); showToast("Joint model will route future ticket submissions."); return; }
-  if (action === "activate-separate") { state.activeModel = "separate"; render(); showToast("Separate models will route future ticket submissions."); return; }
-  if (action === "show-joint") { state.modelDashboard = "joint"; render(); return; }
-  if (action === "show-separate") { state.modelDashboard = "separate"; render(); return; }
+  if (action === "activate-joint") {
+    if (serverSessionIsActive()) void activateServerModel("joint");
+    else { state.activeModel = "joint"; render(); showToast("Joint model will route future ticket submissions."); }
+    return;
+  }
+  if (action === "activate-separate") {
+    if (serverSessionIsActive()) void activateServerModel("separate");
+    else { state.activeModel = "separate"; render(); showToast("Separate models will route future ticket submissions."); }
+    return;
+  }
+  if (action === "show-joint") {
+    state.modelDashboard = "joint";
+    state.serverData.modelOperational = null;
+    render();
+    if (serverSessionIsActive()) void refreshServerModelOperational("joint", state.modelOperationalPeriod);
+    return;
+  }
+  if (action === "show-separate") {
+    state.modelDashboard = "separate";
+    state.serverData.modelOperational = null;
+    render();
+    if (serverSessionIsActive()) void refreshServerModelOperational("separate", state.modelOperationalPeriod);
+    return;
+  }
   if (action === "back-model-centre") { state.modelDashboard = null; render(); return; }
   if (action === "set-model-operational-period") {
     state.modelOperationalPeriod = event.target.closest("[data-period]").dataset.period;
-    render();
+    if (serverSessionIsActive()) void refreshServerModelOperational(state.modelDashboard, state.modelOperationalPeriod);
+    else render();
   }
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target.matches("[data-table-page-input]")) {
+    event.preventDefault();
+    goToTablePage(event.target.dataset.tablePageInput, event.target.value);
+    return;
+  }
+  if (event.key === "Enter" && event.target.matches("[data-server-page-input]")) {
+    event.preventDefault();
+    goToStaffPerformancePage(event.target.value);
+    return;
+  }
+  if (event.key === "Escape" && state.staffUserDialog) {
+    closeActiveDialog("staffUserDialog");
+    return;
+  }
   if (event.key === "Escape" && state.adminTicketDialog) {
-    state.adminTicketDialog = null;
-    render();
+    closeActiveDialog("adminTicketDialog");
     return;
   }
   if (event.key === "Escape" && state.staffTicketDialog) {
-    state.staffTicketDialog = null;
-    render();
+    closeActiveDialog("staffTicketDialog");
     return;
   }
   if (event.key === "Escape" && state.accountMenuOpen) {
@@ -1394,30 +3676,182 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-table-page-input]")) {
+    goToTablePage(event.target.dataset.tablePageInput, event.target.value);
+    return;
+  }
+  if (event.target.matches("[data-server-page-input]")) {
+    goToStaffPerformancePage(event.target.value);
+    return;
+  }
+  if (event.target.dataset.staffQueueFilter !== undefined) {
+    state.staffQueueFilter = event.target.value;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
   if (event.target.dataset.auditCategory !== undefined) {
     state.auditCategory = event.target.value;
-    render();
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   const ticketPoolFilterName = event.target.dataset.ticketPoolFilter;
   if (ticketPoolFilterName) {
     state.ticketPoolFilters[ticketPoolFilterName] = event.target.value;
-    render();
+    state.staffTicketPoolPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   const myTicketsFilterName = event.target.dataset.myTicketsFilter;
   if (!myTicketsFilterName) return;
   state.myTicketsFilters[myTicketsFilterName] = event.target.value;
-  render();
+  state.staffMyTicketsPage = 1;
+  if (serverSessionIsActive()) void refreshServerData();
+  else render();
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target.id === "admin-ticket-queue") {
+    const form = event.target.closest("#admin-ticket-management-form");
+    const assigneeSelect = form?.elements?.["admin-ticket-assignee"];
+    if (!assigneeSelect) return;
+    const previousAssignee = assigneeSelect.value;
+    assigneeSelect.innerHTML = renderAdminAssigneeOptions(event.target.value, previousAssignee);
+    if (!getAssignmentStaffNames(event.target.value).includes(previousAssignee)) {
+      assigneeSelect.value = "Unassigned";
+    }
+    return;
+  }
+  const adminFilterName = event.target.dataset.adminTicketFilter;
+  if (!adminFilterName) return;
+  state.adminTicketFilters[adminFilterName] = event.target.value;
+  state.adminAttentionPage = 1;
+  state.adminAllTicketsPage = 1;
+  if (serverSessionIsActive()) void refreshServerData();
+  else render();
 });
 
 document.addEventListener("input", (event) => {
-  if (event.target.id !== "audit-query") return;
-  const clearButton = event.target.closest(".audit-search-input")?.querySelector(".audit-search-clear");
-  if (clearButton) clearButton.disabled = !event.target.value;
+  if (event.target.id === "audit-query") {
+    const clearButton = event.target.closest(".audit-search-input")?.querySelector(".audit-search-clear");
+    if (clearButton) clearButton.disabled = !event.target.value;
+    return;
+  }
+  if (event.target.id === "admin-ticket-search") {
+    const clearButton = event.target.closest(".admin-ticket-search-input")?.querySelector(".admin-ticket-search-clear");
+    if (clearButton) clearButton.disabled = !event.target.value;
+    return;
+  }
+  if (event.target.id === "staff-my-tickets-search") {
+    const clearButton = event.target.closest(".staff-my-tickets-search-input")?.querySelector("button");
+    if (clearButton) clearButton.disabled = !event.target.value;
+  }
 });
 
 document.addEventListener("submit", (event) => {
+  if (event.target.id === "admin-ticket-search-form") {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    state.adminTicketSearch = String(formData.get("admin-ticket-search") || "").trim();
+    state.adminAttentionPage = 1;
+    state.adminAllTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (event.target.id === "staff-my-tickets-search-form") {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    state.myTicketsSearch = String(formData.get("staff-my-tickets-search") || "").trim();
+    state.staffMyTicketsPage = 1;
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
+    return;
+  }
+  if (event.target.id === "staff-user-form") {
+    event.preventDefault();
+    const form = event.target;
+    if (serverSessionIsActive()) {
+      void saveServerStaffUser(form);
+      return;
+    }
+    const formData = new FormData(form);
+    const firstName = String(formData.get("staff-first-name") || "").trim();
+    const lastName = String(formData.get("staff-last-name") || "").trim();
+    const email = String(formData.get("staff-email") || "").trim().toLowerCase();
+    const phone = String(formData.get("staff-phone") || "").trim();
+    const title = String(formData.get("staff-title") || "").trim();
+    const queue = String(formData.get("staff-queue") || "");
+    const userId = form.dataset.staffId;
+    if (!firstName || !lastName || !email || !title || !queue) {
+      showToast("Complete the staff name, email, role title, and assigned queue.");
+      return;
+    }
+    const duplicateEmail = staffUsers.some((user) => user.id !== userId && user.email.toLowerCase() === email);
+    if (duplicateEmail) {
+      showToast("A staff member with this email address already exists.");
+      return;
+    }
+    if (userId === "new") {
+      const idStem = `staff-${firstName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${lastName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      let newId = idStem;
+      let suffix = 2;
+      while (staffUsers.some((user) => user.id === newId)) {
+        newId = `${idStem}-${suffix}`;
+        suffix += 1;
+      }
+      const newUser = {
+        id: newId, firstName, lastName, email, phone, title, queue,
+        status: "Available", activeTickets: 0, waitingReply: 0,
+        resolved: {
+          today: { count: 0, sla: "—", time: "—" },
+          week: { count: 0, sla: "—", time: "—" },
+          month: { count: 0, sla: "—", time: "—" },
+        },
+      };
+      staffUsers.push(newUser);
+      assignmentStaffUsers.push({ ...newUser });
+      state.staffUserDialog = newId;
+      state.staffQueueFilter = "all";
+      render();
+      showToast(`${firstName} ${lastName} was added to ${queue}.`);
+      return;
+    }
+    const user = getStaffUser(userId);
+    if (!user) {
+      showToast("That staff member is no longer available.");
+      return;
+    }
+    Object.assign(user, { firstName, lastName, email, phone, title, queue });
+    const assignmentUser = assignmentStaffUsers.find((item) => item.id === userId);
+    if (assignmentUser) Object.assign(assignmentUser, { firstName, lastName, email, phone, title, queue });
+    if (user.id === accountProfiles.staff.id) {
+      accountProfiles.staff = { ...accountProfiles.staff, firstName, lastName, phone };
+      roleDefinitions.staff.name = getProfileDisplayName(user);
+      roleDefinitions.staff.title = queue;
+    }
+    render();
+    showToast(`${firstName} ${lastName}'s staff record was updated.`);
+    return;
+  }
+  if (event.target.id === "admin-force-close-form") {
+    event.preventDefault();
+    const ticketId = event.target.dataset.ticketId;
+    const reason = String(new FormData(event.target).get("admin-force-close-reason") || "").trim();
+    if (!reason) {
+      showToast("Enter a closure reason before force closing this ticket.");
+      return;
+    }
+    if (!window.confirm(`Force close ${ticketId}? The customer and staff will no longer be able to reopen it.`)) return;
+    if (serverSessionIsActive()) {
+      void forceCloseServerTicket(ticketId, reason);
+      return;
+    }
+    forceCloseAdminTicket(ticketId, reason);
+    return;
+  }
   if (event.target.id === "admin-ticket-management-form") {
     event.preventDefault();
     const ticketId = event.target.dataset.ticketId;
@@ -1429,28 +3863,40 @@ document.addEventListener("submit", (event) => {
     const formData = new FormData(event.target);
     const nextQueue = String(formData.get("admin-ticket-queue") || "");
     const nextAssignee = String(formData.get("admin-ticket-assignee") || "Unassigned");
-    if (!nextQueue) {
-      showToast("Select a queue before saving this ticket.");
+    const nextPriority = String(formData.get("admin-ticket-priority") || "");
+    if (!nextQueue || !nextPriority) {
+      showToast("Select a queue and priority before saving this ticket.");
       return;
     }
-    const routeChanged = ticket.routingFailed || ticket.queue !== nextQueue;
+    if (serverSessionIsActive()) {
+      void routeServerAdminTicket(ticketId, { queueName: nextQueue, assigneeName: nextAssignee, priorityValue: nextPriority });
+      return;
+    }
+    const routeChanged = ticket.routingFailed || ticket.queue !== nextQueue || ticket.priority !== nextPriority;
+    if (!ticket.originalPrediction && routeChanged) {
+      ticket.originalPrediction = { queue: ticket.queue, priority: ticket.priority };
+    }
     ticket.queue = nextQueue;
     ticket.assignee = nextAssignee;
+    ticket.priority = nextPriority;
     ticket.routingFailed = false;
     if (routeChanged) ticket.routeCorrected = true;
-    state.adminTicketDialog = null;
-    render();
-    showToast(`${ticket.id} was routed to ${nextQueue} and assigned to ${nextAssignee}.`);
+    closeActiveDialog("adminTicketDialog", () => showToast(`${ticket.id} was updated with ${nextPriority} priority, routed to ${nextQueue}, and assigned to ${nextAssignee}.`));
     return;
   }
   if (event.target.id === "audit-search-form") {
     event.preventDefault();
     state.auditQuery = String(new FormData(event.target).get("audit-query") || "").trim();
-    render();
+    if (serverSessionIsActive()) void refreshServerData();
+    else render();
     return;
   }
   if (event.target.id === "profile-form") {
     event.preventDefault();
+    if (serverSessionIsActive()) {
+      void saveServerProfile(event.target);
+      return;
+    }
     const formData = new FormData(event.target);
     accountProfiles[state.role] = {
       id: accountProfiles[state.role].id,
@@ -1485,6 +3931,10 @@ document.addEventListener("submit", (event) => {
       error.hidden = false;
       return;
     }
+    if (serverSessionIsActive()) {
+      void changeServerPassword(event.target, { currentPassword, newPassword, confirmPassword }, error);
+      return;
+    }
     error.hidden = true;
     event.target.reset();
     showToast("New password saved.");
@@ -1492,27 +3942,114 @@ document.addEventListener("submit", (event) => {
   }
   if (event.target.id === "customer-reply-form") {
     event.preventDefault();
-    state.customerTicketDialog = null;
-    render();
-    showToast("Reply sent. Your ticket is now back with the support team.");
+    const ticketId = state.customerTicketDialog;
+    const form = event.target;
+    const body = String(new FormData(form).get("customer-reply") || "").trim();
+    const error = form.querySelector("#customer-reply-error");
+    if (!body) {
+      error.textContent = "Write a reply before sending it to support.";
+      error.hidden = false;
+      form.elements["customer-reply"]?.focus();
+      return;
+    }
+    error.hidden = true;
+    if (serverSessionIsActive()) {
+      void replyToCustomerTicket(ticketId, body, error, form);
+      return;
+    }
+    setTicketStatus(ticketId, "Waiting for Support", "waiting", {
+      updated: "Customer replied",
+      updatedDetail: "Waiting for support reply",
+    });
+    state.waitingForCustomerSince.delete(ticketId);
+    closeActiveDialog("customerTicketDialog", () => showToast("Reply sent. Your ticket is now back with the support team."));
     return;
   }
-  if (event.target.id === "staff-reply-form") {
-    event.preventDefault();
-    const ticket = getStaffTicket(state.staffTicketDialog);
-    state.staffTicketDialog = null;
-    render();
-    showToast(`Reply sent to ${ticket?.createdBy || "the customer"}.`);
-    return;
-  }
-  if (event.target.id !== "ticket-form") return;
-  event.preventDefault();
-  const submittedDraftId = state.activeDraftId;
-  if (submittedDraftId) state.discardedDraftIds.add(submittedDraftId);
-  state.activeDraftId = null;
-  showToast(submittedDraftId ? "Draft submitted. The routing result will appear in your ticket timeline." : "Ticket submitted. The routing result will appear in your ticket timeline.");
-  state.page = "tickets";
-  window.setTimeout(render, 650);
 });
 
-render();
+document.addEventListener("submit", (event) => {
+  const form = event.target;
+  if (form.id === "public-login-form") {
+    event.preventDefault();
+    const formData = new FormData(form);
+    startPrototypeSession(String(formData.get("login-email") || ""));
+    return;
+  }
+  if (form.id === "ticket-form") {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const subject = String(formData.get("subject") || "").trim();
+    const description = String(formData.get("description") || "").trim();
+    const issueChoice = String(formData.get("issue-choice") || "");
+    const error = form.querySelector("#ticket-form-error");
+    const firstMissingField = !subject ? form.elements.subject : !description ? form.elements.description : !issueChoice ? form.elements["issue-choice"] : null;
+    if (firstMissingField) {
+      error.textContent = "Enter a subject, describe the issue, and select what best describes it before submitting.";
+      error.hidden = false;
+      firstMissingField.focus();
+      return;
+    }
+    error.hidden = true;
+    if (serverSessionIsActive()) {
+      void submitServerCustomerTicket(form);
+      return;
+    }
+    if (state.customerActionPending) return;
+    setCustomerTicketActionPending(form, true, "submit");
+    const submittedDraftId = state.activeDraftId;
+    if (submittedDraftId) state.discardedDraftIds.add(submittedDraftId);
+    state.activeDraftId = null;
+    state.customerFormRequestKey = "";
+    showToast(submittedDraftId ? "Draft submitted. The routing result will appear in your ticket timeline." : "Ticket submitted. The routing result will appear in your ticket timeline.");
+    state.page = "tickets";
+    window.setTimeout(() => {
+      setCustomerTicketActionPending(form, false);
+      render();
+    }, 650);
+    return;
+  }
+  if (form.id === "staff-reply-form") {
+    event.preventDefault();
+    const reply = String(new FormData(form).get("staff-reply") || "").trim();
+    const error = form.querySelector("#staff-reply-error");
+    if (!reply) {
+      error.textContent = "Write a reply before sending it to the customer.";
+      error.hidden = false;
+      form.elements["staff-reply"].focus();
+      return;
+    }
+    error.hidden = true;
+    if (serverSessionIsActive()) {
+      void replyToStaffTicket(state.staffTicketDialog, reply, error, form);
+      return;
+    }
+    const ticket = getStaffTicket(state.staffTicketDialog);
+    if (ticket) {
+      staffTicketConversations[ticket.id] = {
+        ...(staffTicketConversations[ticket.id] || {}),
+        customerMessage: staffTicketConversations[ticket.id]?.customerMessage || `The customer needs help with: ${ticket.subject}.`,
+        staffMessage: reply,
+      };
+      setTicketStatus(ticket.id, "Waiting for Customer", "waiting", {
+        updated: "Support replied",
+        updatedDetail: "Waiting for customer response",
+      });
+      state.waitingForCustomerSince.set(ticket.id, PROTOTYPE_TODAY.toISOString());
+    }
+    closeActiveDialog("staffTicketDialog", () => showToast(`Reply sent to ${ticket?.createdBy || "the customer"}.`));
+  }
+});
+
+const serverSession = getServerSession();
+if (serverSession) startServerSession(serverSession);
+else {
+  render();
+  showLoginScreen();
+}
+
+window.setInterval(() => {
+  if (!serverSessionIsActive() || state.serverLoading) return;
+  if (["new-ticket", "edit-profile", "change-password"].includes(state.page)) return;
+  if (state.customerTicketDialog || state.staffTicketDialog || state.adminTicketDialog || state.staffUserDialog) return;
+  void refreshServerData();
+}, 60_000);

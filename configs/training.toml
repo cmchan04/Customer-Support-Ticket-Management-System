@@ -33,6 +33,11 @@ type_router_calibrate_queue = true
 type_router_calibration_cv_folds = 3
 type_router_calibration_passes = 3
 type_router_calibration_grid = [-1.5, -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5]
+# Fits a cross-validated sigmoid probability layer after an SVM wins model
+# selection. This adds calibrated confidence to saved SVM predictions.
+svm_probability_calibration = true
+svm_probability_calibration_cv_folds = 3
+svm_probability_calibration_method = "sigmoid"
 joint_type_weights = [3]
 joint_c = [10.0]
 joint_ngram_ranges = [[1, 3], [1, 4]]

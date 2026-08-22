@@ -141,6 +141,7 @@
         "model": "xgboost"
       }
     ],
+    "confidence_method": "sigmoid_calibrated_probability",
     "cv_macro_f1": 0.7536354723057251,
     "holdout_metrics": {
       "accuracy": 0.7858017135862914,
@@ -300,6 +301,7 @@
         "model": "xgboost"
       }
     ],
+    "confidence_method": "sigmoid_calibrated_probability",
     "cv_macro_f1": 0.7296497617941333,
     "holdout_metrics": {
       "accuracy": 0.7695838433292533,

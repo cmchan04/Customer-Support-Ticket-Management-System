@@ -7,11 +7,103 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import f1_score
 from sklearn.model_selection import StratifiedKFold
 
 
-class TicketTypeRouterClassifier(BaseEstimator, ClassifierMixin):
+class CalibratedSVMClassifier(ClassifierMixin, BaseEstimator):
+    """Add calibrated probabilities to a fitted-decision Linear SVM workflow.
+
+    ``LinearSVC`` deliberately exposes only a decision score, not a
+    probability. This wrapper keeps the raw estimator for label prediction
+    (so existing routing and macro-F1 decision-bias rules remain intact) and
+    fits a separate cross-validated sigmoid calibration layer for confidence
+    reporting. The calibration folds are internal to the supplied training
+    data, so a holdout set remains unseen until evaluation.
+    """
+
+    def __init__(
+        self,
+        estimator: Any,
+        *,
+        cv_folds: int = 3,
+        method: str = "sigmoid",
+        random_state: int = 29,
+        n_jobs: int | None = None,
+    ) -> None:
+        self.estimator = estimator
+        self.cv_folds = cv_folds
+        self.method = method
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+
+    def fit(self, x: Any, y: Any) -> CalibratedSVMClassifier:
+        """Fit the raw SVM and an out-of-fold probability calibrator."""
+        labels = np.asarray(y)
+        if len(labels) == 0:
+            raise ValueError("At least one training row is required for calibration.")
+        if self.method not in {"sigmoid", "isotonic"}:
+            raise ValueError("Calibration method must be 'sigmoid' or 'isotonic'.")
+        if self.cv_folds < 2:
+            raise ValueError("cv_folds must be at least 2 for probability calibration.")
+
+        _, counts = np.unique(labels, return_counts=True)
+        if len(counts) < 2:
+            raise ValueError("Probability calibration requires at least two classes.")
+        folds = min(self.cv_folds, int(counts.min()))
+        if folds < 2:
+            raise ValueError(
+                "Each class needs at least two training rows for probability calibration."
+            )
+
+        self.estimator_ = clone(self.estimator).fit(x, labels)
+        splitter = StratifiedKFold(
+            n_splits=folds, shuffle=True, random_state=self.random_state
+        )
+        self.calibrator_ = CalibratedClassifierCV(
+            estimator=clone(self.estimator),
+            method=self.method,
+            cv=splitter,
+            n_jobs=self.n_jobs,
+        ).fit(x, labels)
+        self.classes_ = np.asarray(self.estimator_.classes_)
+        self.calibration_method_ = f"{self.method}_calibrated_probability"
+        self.calibration_cv_folds_ = folds
+        return self
+
+    def predict(self, x: Any) -> np.ndarray:
+        """Return raw labels, preserving the existing routing behaviour."""
+        self._validate_fitted()
+        return np.asarray(self.estimator_.predict(x))
+
+    def predict_proba(self, x: Any) -> np.ndarray:
+        """Return calibrated class probabilities aligned to ``classes_``."""
+        self._validate_fitted()
+        probabilities = np.asarray(self.calibrator_.predict_proba(x))
+        calibrated_classes = np.asarray(self.calibrator_.classes_)
+        if np.array_equal(calibrated_classes, self.classes_):
+            return probabilities
+
+        aligned = np.zeros((len(probabilities), len(self.classes_)), dtype=float)
+        class_indices = {label: index for index, label in enumerate(self.classes_)}
+        for calibrated_index, label in enumerate(calibrated_classes):
+            aligned[:, class_indices[label]] = probabilities[:, calibrated_index]
+        return aligned
+
+    def decision_function(self, x: Any) -> np.ndarray:
+        """Expose raw SVM scores for diagnostics and legacy callers."""
+        self._validate_fitted()
+        if not hasattr(self.estimator_, "decision_function"):
+            raise AttributeError("Wrapped estimator has no decision_function.")
+        return np.asarray(self.estimator_.decision_function(x))
+
+    def _validate_fitted(self) -> None:
+        if not hasattr(self, "estimator_") or not hasattr(self, "calibrator_"):
+            raise ValueError("CalibratedSVMClassifier must be fitted before prediction.")
+
+
+class TicketTypeRouterClassifier(ClassifierMixin, BaseEstimator):
     """Route each ticket to a classifier trained for its ticket type.
 
     ``base_estimator`` is normally a complete text pipeline.  The estimator is
@@ -134,7 +226,11 @@ class TicketTypeRouterClassifier(BaseEstimator, ClassifierMixin):
     def _raw_decision_function(self, x: pd.DataFrame) -> np.ndarray:
         self._validate_fitted()
         self._validate_input(x)
-        scores = np.full((len(x), len(self.classes_)), -np.inf, dtype=float)
+        # A type-specific estimator may not have observed every global class.
+        # Give unavailable classes a score below its weakest available class,
+        # rather than ``-inf``. The winning label is unchanged, while this
+        # finite matrix is safe for CalibratedClassifierCV.
+        scores = np.full((len(x), len(self.classes_)), np.nan, dtype=float)
         class_indices = {label: index for index, label in enumerate(self.classes_)}
         for indices, estimator in self._group_estimators(x):
             if not hasattr(estimator, "decision_function"):
@@ -145,6 +241,10 @@ class TicketTypeRouterClassifier(BaseEstimator, ClassifierMixin):
                 raw_scores = np.column_stack((-raw_scores, raw_scores))
             for local_index, label in enumerate(estimator_classes):
                 scores[indices, class_indices[label]] = raw_scores[:, local_index]
+            missing = np.isnan(scores[indices])
+            if bool(missing.any()):
+                lowest_score = np.nanmin(scores[indices], axis=1, keepdims=True)
+                scores[indices] = np.where(missing, lowest_score - 1.0, scores[indices])
         return scores
 
     def fit_decision_bias(

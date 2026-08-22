@@ -16,6 +16,18 @@ class TicketPrediction:
     priority: str
 
 
+@dataclass(frozen=True)
+class TicketScoredPrediction:
+    """Prediction labels with calibrated confidence percentages when available."""
+
+    queue: str
+    priority: str
+    queue_confidence_percent: float | None
+    priority_confidence_percent: float | None
+    queue_confidence_method: str
+    priority_confidence_method: str
+
+
 class TicketPredictor:
     """Loads two trusted local pipelines and predicts labels for one submitted ticket."""
 
@@ -46,11 +58,57 @@ class TicketPredictor:
 
     def predict(self, subject: str, body: str, ticket_type: str = "") -> TicketPrediction:
         """Return a queue and priority for a ticket with a non-empty body."""
+        return self._predict_ticket(self._ticket_frame(subject, body, ticket_type))
+
+    def predict_scored(
+        self, subject: str, body: str, ticket_type: str = ""
+    ) -> TicketScoredPrediction:
+        """Return labels and calibrated confidence percentages where supported.
+
+        Artifacts trained before SVM probability calibration remain usable, but
+        report ``None`` and ``"unavailable"`` until they are retrained.
+        """
+        ticket = self._ticket_frame(subject, body, ticket_type)
+        prediction = self._predict_ticket(ticket)
+        if self._joint_pipeline is not None:
+            queue_confidence, priority_confidence, method = self._joint_confidences(
+                ticket, prediction.queue, prediction.priority
+            )
+            return TicketScoredPrediction(
+                queue=prediction.queue,
+                priority=prediction.priority,
+                queue_confidence_percent=queue_confidence,
+                priority_confidence_percent=priority_confidence,
+                queue_confidence_method=method,
+                priority_confidence_method=method,
+            )
+
+        if self._queue_pipeline is None or self._priority_pipeline is None:
+            raise ValueError("TicketPredictor has no queue and priority pipelines.")
+        queue_confidence, queue_method = self._label_confidence(
+            self._queue_pipeline, ticket, prediction.queue
+        )
+        priority_confidence, priority_method = self._label_confidence(
+            self._priority_pipeline, ticket, prediction.priority
+        )
+        return TicketScoredPrediction(
+            queue=prediction.queue,
+            priority=prediction.priority,
+            queue_confidence_percent=queue_confidence,
+            priority_confidence_percent=priority_confidence,
+            queue_confidence_method=queue_method,
+            priority_confidence_method=priority_method,
+        )
+
+    @staticmethod
+    def _ticket_frame(subject: str, body: str, ticket_type: str) -> pd.DataFrame:
         if not body or not body.strip():
             raise ValueError("Ticket body must not be empty.")
-        ticket = pd.DataFrame(
+        return pd.DataFrame(
             {"subject": [subject or ""], "body": [body], "type": [ticket_type or ""]}
         )
+
+    def _predict_ticket(self, ticket: pd.DataFrame) -> TicketPrediction:
         if self._joint_pipeline is not None:
             joint_label = str(self._joint_pipeline.predict(ticket)[0])
             if "||" not in joint_label:
@@ -64,3 +122,43 @@ class TicketPredictor:
             queue=str(self._queue_pipeline.predict(ticket)[0]),
             priority=str(self._priority_pipeline.predict(ticket)[0]),
         )
+
+    @staticmethod
+    def _label_confidence(
+        pipeline: Any, ticket: pd.DataFrame, label: str
+    ) -> tuple[float | None, str]:
+        if not hasattr(pipeline, "predict_proba"):
+            return None, "unavailable"
+        classifier = pipeline.named_steps["classifier"] if hasattr(pipeline, "named_steps") else pipeline
+        probabilities = pipeline.predict_proba(ticket)[0]
+        classes = list(classifier.classes_)
+        if label not in classes:
+            return None, "unavailable"
+        confidence = float(probabilities[classes.index(label)] * 100)
+        method = getattr(classifier, "calibration_method_", "model_probability")
+        return round(confidence, 2), str(method)
+
+    def _joint_confidences(
+        self, ticket: pd.DataFrame, queue: str, priority: str
+    ) -> tuple[float | None, float | None, str]:
+        if self._joint_pipeline is None or not hasattr(self._joint_pipeline, "predict_proba"):
+            return None, None, "unavailable"
+        classifier = (
+            self._joint_pipeline.named_steps["classifier"]
+            if hasattr(self._joint_pipeline, "named_steps")
+            else self._joint_pipeline
+        )
+        probabilities = self._joint_pipeline.predict_proba(ticket)[0]
+        queue_confidence = 0.0
+        priority_confidence = 0.0
+        for label, probability in zip(classifier.classes_, probabilities, strict=True):
+            value = str(label)
+            if "||" not in value:
+                continue
+            predicted_queue, predicted_priority = value.split("||", 1)
+            if predicted_queue == queue:
+                queue_confidence += float(probability)
+            if predicted_priority == priority:
+                priority_confidence += float(probability)
+        method = getattr(classifier, "calibration_method_", "model_probability")
+        return round(queue_confidence * 100, 2), round(priority_confidence * 100, 2), str(method)

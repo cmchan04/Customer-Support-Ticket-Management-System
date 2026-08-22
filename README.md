@@ -44,7 +44,8 @@ prediction.
 
 ## Dataset metadata
 
-Training reads `resources/data/aa_dataset-tickets-multi-lang-5-2-50-version.csv`.
+Training reads `resources/data/aa_dataset-tickets-multi-lang-5-2-50-version.csv`. 
+This is from open-source platform Hugging Face, which can access with the link: https://huggingface.co/datasets/Tobi-Bueck/customer-support-tickets
 The following counts are from the current validated training dataset after
 filtering to English, filling missing subjects with an empty string, removing
 invalid text/target rows, and deduplicating identical ticket text.
@@ -214,6 +215,62 @@ pointing the prediction command at that directory:
 ticket-ml predict --model-dir artifacts\models\joint --ticket-type Incident --subject "Account outage" --body "I cannot access my account after the service interruption."
 ```
 
+### IT Support + Technical Support merge experiment
+
+To test whether the two technical queues are easier to classify as one
+operational destination, run the isolated merge experiment:
+
+```powershell
+ticket-ml tune-merge-it-technical --config configs\training.toml
+```
+
+Only the experiment's in-memory label view maps `IT Support` to
+`Technical Support`; the source CSV, production models, and database queues
+are not changed. Reports are written to
+`resources/model_output/merge_it_technical_experiment/` and the experimental
+pipelines to `artifacts/models/experiments/merge_it_technical/`.
+
+The resulting queue target has nine classes. Compare its queue macro F1,
+per-class recall, and confusion matrix with the current ten-class experiment
+before considering an operational queue change. The completed seed-29 run
+selected `linear_svm_by_type` for both targets:
+
+| Target | Existing ten-class accuracy | Merged accuracy | Existing macro F1 | Merged macro F1 |
+| --- | ---: | ---: | ---: | ---: |
+| Queue | 76.96% | 81.33% | 78.90% | 81.14% |
+| Priority | 78.58% | 79.35% | 78.19% | 78.98% |
+
+The merge substantially improves the unified Technical Support class, but
+Product Support recall falls from 72.36% to 69.43%. Treat this as evidence for
+an operational review, not as a production replacement. The saved artifacts
+are not loaded by the normal prediction command.
+
+To test the same label merge with the joint queue-and-priority model, run the
+separate isolated command below. It does not overwrite
+`artifacts/models/joint/`:
+
+```powershell
+ticket-ml tune-merge-it-technical-joint --config configs\training.toml
+```
+
+The merged joint artifact is written to
+`artifacts/models/experiments/merge_it_technical_joint/`, while its reports are
+written to `resources/model_output/merge_it_technical_joint_experiment/`.
+This command changes only the in-memory training labels; the source CSV,
+production model, and database queue names remain unchanged.
+
+The completed seed-29 run selected `linear_svm_joint_by_type` and produced the
+following untouched-holdout comparison with the existing ten-class joint model:
+
+| Target | Existing joint accuracy | Merged joint accuracy | Existing joint macro F1 | Merged joint macro F1 |
+| --- | ---: | ---: | ---: | ---: |
+| Queue | 78.06% | 81.61% | 79.49% | 81.34% |
+| Priority | 80.26% | 80.57% | 79.95% | 80.20% |
+
+Queue accuracy improves by 3.55 percentage points and priority accuracy by
+0.31 points. The merged joint model is still an experiment; it is not selected
+by the application and does not replace either fixed deployment.
+
 ### Interactive terminal menu
 
 Open the local menu for prediction and model retraining:
@@ -256,6 +313,22 @@ Predict a queue and priority using the saved models:
 ticket-ml predict --model-dir artifacts\models --subject "Account outage" --body "I cannot access my account after the service interruption."
 ```
 
+Include the queue and priority confidence percentages when the selected model
+has a probability output. After the calibrated SVM update, retrain the model
+first so the saved SVM artifact contains its sigmoid calibration layer:
+
+```powershell
+ticket-ml predict --model-dir artifacts\models --ticket-type Incident --subject "Account outage" --body "I cannot access my account after the service interruption." --with-confidence
+```
+
+The command returns `queue_confidence_percent` and
+`priority_confidence_percent`, each on a 0--100 scale, plus the method used.
+For a current calibrated Linear SVM, the method is
+`sigmoid_calibrated_probability`. Older Linear SVM artifacts remain valid for
+label prediction but report `null` and `unavailable` until they are retrained.
+The displayed percentage is a calibrated review signal, not a guarantee that
+the prediction is correct.
+
 When using a type-aware model, also pass the customer-selected type:
 
 ```powershell
@@ -278,7 +351,33 @@ pytest -q
 Run the code-quality checks:
 
 ```powershell
-ruff check src tests
+ruff check src tests web
+```
+
+## Django backend
+
+The database-backed implementation is in [`web/`](web/README.md). It uses
+SQLite, Django 5.2, session authentication, role-filtered JSON dashboard
+endpoints, the existing fixed Joint/Separate model artifacts, and the
+`TicketWorkflow` transition seam. It does not retrain models or expose
+rollback from a web request.
+
+Start it with:
+
+```powershell
+python -m pip install -e ".[dev]"
+python web\manage.py migrate
+python web\manage.py seed_demo_data
+python web\manage.py sync_model_deployments
+python web\manage.py runserver 127.0.0.1:8000
+```
+
+Run the backend checks with:
+
+```powershell
+python web\manage.py check
+python web\manage.py test web.tickets
+python -m ruff check src tests web
 ```
 
 ## Training outputs and current result
@@ -299,6 +398,14 @@ artifacts/models/metadata.json
 Reports, confusion matrices, ROC/precision-recall plots, and misclassification
 samples are written to `resources/model_output/`. Training replaces the model
 and report files with results from the new run.
+
+When an SVM wins, `train` now fits its probability calibration only after
+cross-validation selects the winning configuration. The calibration uses three
+stratified folds inside the training 80%, while the 20% holdout remains unseen.
+The final saved model is then recalibrated on the complete validated dataset.
+Its settings and the resulting `confidence_method` are recorded in
+`artifacts/models/metadata.json`. The equivalent process is used by
+`ticket-ml tune-joint-type` for `artifacts/models/joint/`.
 
 If `metadata.json` selects `linear_svm_by_type`, the deployed form must supply
 the same four-value `type` field used during training. The normal `train`

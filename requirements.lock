@@ -1,4 +1,6 @@
 # Exact environment used to train and load the initial FYP models.
+Django==5.2.17
+asgiref==3.12.1
 click==8.3.2
 colorama==0.4.6
 contourpy==1.3.3
@@ -24,6 +26,7 @@ scikit-learn==1.8.0
 scipy==1.17.1
 seaborn==0.13.2
 six==1.17.0
+sqlparse==0.6.0
 threadpoolctl==3.6.0
 tqdm==4.67.3
 tzdata==2026.1

@@ -12,6 +12,7 @@ from typing import Any
 
 import joblib
 import numpy as np
+import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -33,7 +34,7 @@ from ticket_ml.evaluation import (
     evaluate_pipeline,
     score_predictions,
 )
-from ticket_ml.models import TicketTypeRouterClassifier
+from ticket_ml.models import CalibratedSVMClassifier, TicketTypeRouterClassifier
 from ticket_ml.text import TicketTextPreprocessor, TicketTypeOneHot, ensure_nltk_resources
 
 
@@ -46,6 +47,7 @@ class TargetTrainingResult:
     holdout_metrics: dict[str, float]
     misclassified_count: int
     candidate_results: tuple[dict[str, Any], ...]
+    confidence_method: str
 
 
 @dataclass(frozen=True)
@@ -182,6 +184,7 @@ class JointTypeExperimentSummary:
     priority_misclassified_count: int
     joint_accuracy: float
     candidate_results: tuple[dict[str, Any], ...]
+    confidence_method: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -197,6 +200,7 @@ class JointTypeExperimentSummary:
             "priority_misclassified_count": self.priority_misclassified_count,
             "joint_accuracy": self.joint_accuracy,
             "candidate_results": list(self.candidate_results),
+            "confidence_method": self.confidence_method,
         }
 
 
@@ -268,6 +272,7 @@ def _target_result_as_dict(result: TargetTrainingResult) -> dict[str, Any]:
         "holdout_metrics": result.holdout_metrics,
         "misclassified_count": result.misclassified_count,
         "candidate_results": list(result.candidate_results),
+        "confidence_method": result.confidence_method,
     }
 
 
@@ -770,7 +775,13 @@ def tune_type_router(config: TrainingConfig) -> TypeRouterExperimentSummary:
     return summary
 
 
-def tune_joint_type(config: TrainingConfig) -> JointTypeExperimentSummary:
+def tune_joint_type(
+    config: TrainingConfig,
+    *,
+    artifact_dir: Path | None = None,
+    report_dir: Path | None = None,
+    cache_dir: Path | None = None,
+) -> JointTypeExperimentSummary:
     """Train and persist the deployable joint queue/priority classifier.
 
     The experiment predicts a reversible ``queue||priority`` label.  This lets
@@ -782,8 +793,9 @@ def tune_joint_type(config: TrainingConfig) -> JointTypeExperimentSummary:
     ensure_nltk_resources()
     # Unlike exploratory variants, the selected joint pipeline is a deployable
     # model. Keep it separate from experiments and from the two-pipeline model.
-    experiment_artifact_dir = config.artifact_dir / "joint"
-    experiment_report_dir = config.report_dir / "joint_type_experiment"
+    experiment_artifact_dir = artifact_dir or (config.artifact_dir / "joint")
+    experiment_report_dir = report_dir or (config.report_dir / "joint_type_experiment")
+    experiment_cache_dir = cache_dir or (config.cache_dir / "joint_type_experiment")
     experiment_artifact_dir.mkdir(parents=True, exist_ok=True)
     experiment_report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -795,7 +807,7 @@ def tune_joint_type(config: TrainingConfig) -> JointTypeExperimentSummary:
     )
     search = GridSearchCV(
         estimator=_joint_type_router_pipeline(
-            config, config.cache_dir / "joint_type_experiment"
+            config, experiment_cache_dir
         ),
         param_grid={
             "base_estimator__text__type_weight": list(config.joint_type_weights),
@@ -831,15 +843,29 @@ def tune_joint_type(config: TrainingConfig) -> JointTypeExperimentSummary:
             }
         )
 
-    selected_evaluation = evaluate_joint_pipeline(
+    selected_pipeline, confidence_method = _fit_deployable_pipeline(
         search.best_estimator_,
+        "linear_svm_joint_by_type",
+        "joint",
+        split.x_train,
+        train_labels,
+        config,
+    )
+    selected_evaluation = evaluate_joint_pipeline(
+        selected_pipeline,
         split.x_test,
         split.queue_test,
         split.priority_test,
         experiment_report_dir,
     )
-    final_pipeline = clone(search.best_estimator_)
-    final_pipeline.fit(dataset.features, _joint_labels(dataset.queue, dataset.priority))
+    final_pipeline, _ = _fit_deployable_pipeline(
+        search.best_estimator_,
+        "linear_svm_joint_by_type",
+        "joint",
+        dataset.features,
+        _joint_labels(dataset.queue, dataset.priority),
+        config,
+    )
     joblib.dump(final_pipeline, experiment_artifact_dir / "joint_pipeline.joblib", compress=3)
 
     summary = JointTypeExperimentSummary(
@@ -856,6 +882,7 @@ def tune_joint_type(config: TrainingConfig) -> JointTypeExperimentSummary:
         priority_misclassified_count=selected_evaluation.priority.misclassified_count,
         joint_accuracy=selected_evaluation.joint_accuracy,
         candidate_results=tuple(candidate_results),
+        confidence_method=confidence_method,
     )
     _write_json(experiment_report_dir / "metrics.json", summary.as_dict())
     _write_json(
@@ -1071,6 +1098,69 @@ def _versions() -> dict[str, str]:
     return output
 
 
+def _fit_type_router_decision_bias_if_required(
+    pipeline: Any,
+    candidate_name: str,
+    target: str,
+    features: pd.DataFrame,
+    labels: Any,
+    config: TrainingConfig,
+) -> None:
+    """Retain the queue-only macro-F1 offsets used by the selected router."""
+    if not (
+        candidate_name == "linear_svm_by_type"
+        and target == "queue"
+        and config.type_router_calibrate_queue
+    ):
+        return
+    if not isinstance(pipeline, TicketTypeRouterClassifier):
+        raise TypeError("The type-router decision calibration requires a routed SVM.")
+    pipeline.fit_decision_bias(
+        features,
+        labels,
+        cv_folds=config.type_router_calibration_cv_folds,
+        grid=config.type_router_calibration_grid,
+        passes=config.type_router_calibration_passes,
+        random_state=config.random_seed,
+    )
+
+
+def _fit_deployable_pipeline(
+    estimator: Any,
+    candidate_name: str,
+    target: str,
+    features: pd.DataFrame,
+    labels: Any,
+    config: TrainingConfig,
+) -> tuple[Any, str]:
+    """Fit an artifact and add probabilities when the selected model is an SVM.
+
+    Candidate selection remains based on the uncalibrated candidate inside its
+    outer cross-validation folds. Calibration is fitted only after a winner is
+    known and only from the training partition, avoiding holdout leakage.
+    """
+    if candidate_name.startswith("linear_svm") and config.svm_probability_calibration:
+        calibrated = CalibratedSVMClassifier(
+            estimator=clone(estimator),
+            cv_folds=config.svm_probability_calibration_cv_folds,
+            method=config.svm_probability_calibration_method,
+            random_state=config.random_seed,
+            n_jobs=config.n_jobs,
+        ).fit(features, labels)
+        _fit_type_router_decision_bias_if_required(
+            calibrated.estimator_, candidate_name, target, features, labels, config
+        )
+        return calibrated, calibrated.calibration_method_
+
+    fitted = clone(estimator).fit(features, labels)
+    _fit_type_router_decision_bias_if_required(
+        fitted, candidate_name, target, features, labels, config
+    )
+    if hasattr(fitted, "predict_proba"):
+        return fitted, "model_probability"
+    return fitted, "unavailable"
+
+
 def _train_target(
     target: str,
     target_train: Any,
@@ -1110,35 +1200,26 @@ def _train_target(
         )
 
     selected_name, selected_search = max(searches, key=lambda entry: entry[1].best_score_)
-    calibration_enabled = (
-        selected_name == "linear_svm_by_type"
-        and target == "queue"
-        and config.type_router_calibrate_queue
+    selected_pipeline, confidence_method = _fit_deployable_pipeline(
+        selected_search.best_estimator_,
+        selected_name,
+        target,
+        split.x_train,
+        target_train,
+        config,
     )
-    if calibration_enabled:
-        selected_search.best_estimator_.fit_decision_bias(
-            split.x_train,
-            target_train,
-            cv_folds=config.type_router_calibration_cv_folds,
-            grid=config.type_router_calibration_grid,
-            passes=config.type_router_calibration_passes,
-            random_state=config.random_seed,
-        )
     evaluation: EvaluationResult = evaluate_pipeline(
-        selected_search.best_estimator_, split.x_test, target_test, target, config.report_dir
+        selected_pipeline, split.x_test, target_test, target, config.report_dir
     )
-    final_pipeline = clone(selected_search.best_estimator_)
     final_target = dataset.queue if target == "queue" else dataset.priority
-    final_pipeline.fit(dataset.features, final_target)
-    if calibration_enabled:
-        final_pipeline.fit_decision_bias(
-            dataset.features,
-            final_target,
-            cv_folds=config.type_router_calibration_cv_folds,
-            grid=config.type_router_calibration_grid,
-            passes=config.type_router_calibration_passes,
-            random_state=config.random_seed,
-        )
+    final_pipeline, _ = _fit_deployable_pipeline(
+        selected_search.best_estimator_,
+        selected_name,
+        target,
+        dataset.features,
+        final_target,
+        config,
+    )
     joblib.dump(final_pipeline, config.artifact_dir / f"{target}_pipeline.joblib", compress=3)
     return TargetTrainingResult(
         target=target,
@@ -1148,6 +1229,7 @@ def _train_target(
         holdout_metrics=evaluation.metrics,
         misclassified_count=evaluation.misclassified_count,
         candidate_results=tuple(candidate_results),
+        confidence_method=confidence_method,
     )
 
 

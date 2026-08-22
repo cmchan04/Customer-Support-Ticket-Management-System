@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 import pytest
 
@@ -97,3 +99,36 @@ def test_prepare_rejects_conflicting_labels_for_identical_text(tmp_path):
 
     with pytest.raises(DataValidationError, match="conflicting"):
         load_and_prepare(_config(path, tmp_path))
+
+
+def test_prepare_can_merge_queue_labels_for_isolated_experiment(tmp_path):
+    path = tmp_path / "merge.csv"
+    pd.DataFrame(
+        [
+            {
+                "subject": "Seller portal issue",
+                "body": "The seller portal cannot load.",
+                "type": "Incident",
+                "queue": "IT Support",
+                "priority": "high",
+                "language": "en",
+            },
+            {
+                "subject": "Customer login issue",
+                "body": "The customer login cannot load.",
+                "type": "Incident",
+                "queue": "Technical Support",
+                "priority": "high",
+                "language": "en",
+            },
+        ]
+    ).to_csv(path, index=False)
+
+    config = replace(
+        _config(path, tmp_path),
+        queue_label_map=(("IT Support", "Technical Support"),),
+    )
+    prepared = load_and_prepare(config)
+
+    assert prepared.summary["queue_classes"] == 1
+    assert prepared.queue.tolist() == ["Technical Support", "Technical Support"]

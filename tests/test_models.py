@@ -5,7 +5,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
 
-from ticket_ml.models import TicketTypeRouterClassifier
+from ticket_ml.models import CalibratedSVMClassifier, TicketTypeRouterClassifier
 from ticket_ml.text import TicketTextPreprocessor
 
 
@@ -147,3 +147,26 @@ def test_ticket_type_router_marginal_joint_prediction_returns_two_labels():
 
     assert len(predictions) == len(frame)
     assert all("||" in str(value) for value in predictions)
+
+
+def test_calibrated_svm_returns_probabilities_without_changing_label_predictions():
+    features = pd.DataFrame(
+        {
+            "score": [-3.0, -2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0],
+        }
+    )
+    labels = pd.Series(["Billing", "Billing", "Billing", "Billing", "Technical", "Technical", "Technical", "Technical"])
+    calibrated = CalibratedSVMClassifier(
+        LinearSVC(class_weight="balanced", random_state=29),
+        cv_folds=2,
+        random_state=29,
+    ).fit(features, labels)
+
+    probabilities = calibrated.predict_proba(features)
+
+    assert calibrated.predict(features).shape == (len(features),)
+    assert probabilities.shape == (len(features), 2)
+    assert (probabilities >= 0).all()
+    assert (probabilities <= 1).all()
+    assert (probabilities.sum(axis=1).round(8) == 1).all()
+    assert calibrated.calibration_method_ == "sigmoid_calibrated_probability"

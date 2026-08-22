@@ -36,3 +36,43 @@ def test_predictor_rejects_empty_body(smoke_training):
     config, _ = smoke_training
     with pytest.raises(ValueError, match="body"):
         TicketPredictor.load(config.artifact_dir).predict("subject", "")
+
+
+def test_scored_prediction_exposes_probability_or_unavailable_marker(smoke_training, capsys):
+    config, _ = smoke_training
+    predictor = TicketPredictor.load(config.artifact_dir)
+    result = predictor.predict_scored(
+        "Technical high request", "Customer reports a technical issue."
+    )
+
+    assert result.queue
+    assert result.priority
+    assert result.queue_confidence_method in {
+        "sigmoid_calibrated_probability",
+        "model_probability",
+        "unavailable",
+    }
+    assert result.priority_confidence_method in {
+        "sigmoid_calibrated_probability",
+        "model_probability",
+        "unavailable",
+    }
+    assert (
+        main(
+            [
+                "predict",
+                "--model-dir",
+                str(config.artifact_dir),
+                "--subject",
+                "Technical high request",
+                "--body",
+                "Customer reports a technical issue.",
+                "--with-confidence",
+            ]
+        )
+        == 0
+    )
+    cli_result = json.loads(capsys.readouterr().out)
+    assert cli_result["queue"] == result.queue
+    assert cli_result["priority"] == result.priority
+    assert "queue_confidence_percent" in cli_result
