@@ -231,3 +231,6 @@ artifacts/cache/
 artifacts/*/
 # Temporary parameter-probe reports are not deployment evidence.
 resources/model_output/*_probe/
+
+# Archived model will not be uploaded to GitHub
+archive/**/*.joblib
