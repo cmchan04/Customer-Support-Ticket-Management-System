@@ -65,12 +65,19 @@ class PredictionService:
 
     def _load_predictor(self, family: str) -> TicketPredictor:
         directory = self.joint_model_dir if family == "joint" else self.model_dir
-        return self._load_predictor_for_directory(str(directory.resolve()))
+        resolved_directory = directory.resolve()
+        metadata_path = resolved_directory / "metadata.json"
+        try:
+            metadata_stamp = metadata_path.stat().st_mtime_ns
+        except OSError:
+            metadata_stamp = 0
+        return self._load_predictor_for_directory(str(resolved_directory), metadata_stamp)
 
     @staticmethod
     @lru_cache(maxsize=2)
-    def _load_predictor_for_directory(directory: str) -> TicketPredictor:
-        """Cache artifacts across request-scoped PredictionService instances."""
+    def _load_predictor_for_directory(directory: str, metadata_stamp: int = 0) -> TicketPredictor:
+        """Cache artifacts while invalidating automatically after promotion."""
+        del metadata_stamp  # It is part of the cache key; the loader only needs the path.
         return TicketPredictor.load(Path(directory))
 
     def _read_version(self, family: str | None = None) -> str:

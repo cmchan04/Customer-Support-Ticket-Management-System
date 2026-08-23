@@ -73,7 +73,7 @@ def ticket_detail(request, ticket_id: int):
     ticket = get_object_or_404(Ticket.objects.select_related("customer", "queue", "assigned_to").prefetch_related("messages__author", "predictions", "reroute_requests__requested_by"), pk=ticket_id)
     if not _visible_to(request.user, ticket):
         return JsonResponse({"detail": "Ticket is not visible to this account."}, status=404)
-    return JsonResponse(serialize_ticket_detail(ticket))
+    return JsonResponse(serialize_ticket_detail(ticket, viewer=request.user))
 
 
 @role_required(User.Role.CUSTOMER)
@@ -88,7 +88,7 @@ def customer_create_draft(request):
             issue_type=str(payload.get("issue_type", "")),
             request_key=_request_key(request),
         )
-        return JsonResponse(serialize_ticket_detail(ticket), status=201)
+        return JsonResponse(serialize_ticket_detail(ticket, viewer=request.user), status=201)
     except Exception as exc:
         return _response_error(exc)
 
@@ -101,14 +101,14 @@ def customer_update_draft(request, ticket_id: int):
         request_key = _request_key(request)
         if ticket.status != Ticket.Status.DRAFT:
             if request_key and ticket.client_request_key == request_key:
-                return JsonResponse(serialize_ticket_detail(ticket))
+                return JsonResponse(serialize_ticket_detail(ticket, viewer=request.user))
             raise ValidationError("Only a draft can be updated.")
         payload = _payload(request)
         ticket.subject = str(payload.get("subject", ticket.subject)).strip()
         ticket.description = str(payload.get("description", ticket.description)).strip()
         ticket.issue_type = str(payload.get("issue_type", ticket.issue_type)).strip()
         ticket.save()
-        return JsonResponse(serialize_ticket_detail(ticket))
+        return JsonResponse(serialize_ticket_detail(ticket, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -138,7 +138,7 @@ def customer_submit(request, ticket_id: int):
             request.user,
             request_key=_request_key(request),
         )
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -148,7 +148,7 @@ def customer_submit(request, ticket_id: int):
 def customer_reply(request, ticket_id: int):
     try:
         result = TicketWorkflow().reply(get_object_or_404(Ticket, pk=ticket_id), request.user, str(_payload(request).get("body", "")))
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -158,7 +158,7 @@ def customer_reply(request, ticket_id: int):
 def customer_resolve(request, ticket_id: int):
     try:
         result = TicketWorkflow().mark_customer_resolved(get_object_or_404(Ticket, pk=ticket_id), request.user)
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -168,7 +168,7 @@ def customer_resolve(request, ticket_id: int):
 def customer_reopen(request, ticket_id: int):
     try:
         result = TicketWorkflow().reopen(get_object_or_404(Ticket, pk=ticket_id), request.user)
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -178,7 +178,7 @@ def customer_reopen(request, ticket_id: int):
 def staff_claim(request, ticket_id: int):
     try:
         result = TicketWorkflow().claim(get_object_or_404(Ticket, pk=ticket_id), request.user)
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -188,7 +188,7 @@ def staff_claim(request, ticket_id: int):
 def staff_reply(request, ticket_id: int):
     try:
         result = TicketWorkflow().reply(get_object_or_404(Ticket, pk=ticket_id), request.user, str(_payload(request).get("body", "")))
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -198,7 +198,7 @@ def staff_reply(request, ticket_id: int):
 def staff_request_reroute(request, ticket_id: int):
     try:
         result = TicketWorkflow().request_reroute(get_object_or_404(Ticket, pk=ticket_id), request.user, str(_payload(request).get("reason", "")))
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -217,7 +217,7 @@ def admin_route(request, ticket_id: int):
             assignee=assignee,
             priority=payload.get("priority"),
         )
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)
 
@@ -227,6 +227,6 @@ def admin_route(request, ticket_id: int):
 def admin_force_close(request, ticket_id: int):
     try:
         result = TicketWorkflow().force_close(get_object_or_404(Ticket, pk=ticket_id), request.user, str(_payload(request).get("reason", "")))
-        return JsonResponse(serialize_ticket_detail(result))
+        return JsonResponse(serialize_ticket_detail(result, viewer=request.user))
     except Exception as exc:
         return _response_error(exc)

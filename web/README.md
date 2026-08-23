@@ -39,6 +39,28 @@ The local demo password is `DemoP@ssw0rd` for all accounts created by either
 seed command. You can override it with `--password` for a temporary
 development dataset. Do not use these commands for production accounts.
 
+## Fixed model deployment
+
+The merged IT/Technical experiment is promoted into the normal read-only model
+locations with the ML command below. It first archives the previous separate
+and joint artifacts under family- and training-method-specific directories:
+
+```powershell
+ticket-ml promote-merged-models --model-root artifacts\models --yes
+python web\manage.py sync_model_deployments
+```
+
+Separate predictions load from `artifacts/models/`; Joint predictions load from
+`artifacts/models/joint/`. The archived predecessors are retained under the
+unified workspace archive at `archive/model_deployment/separate/` and
+`archive/model_deployment/joint/`.
+After this version of the code is running, subsequent promotions are detected
+on the next request because the `PredictionService` cache keys include the
+deployed metadata timestamp. Restart the server once after upgrading to this
+cache-aware version.
+Existing ticket prediction records are immutable and continue to identify the
+model family and version used when each ticket was submitted.
+
 ## Synthetic e-commerce test dataset
 
 To exercise the complete dashboard and ticket workflow with a realistic local
@@ -51,7 +73,7 @@ python web\manage.py seed_ecommerce_demo_data
 The default preview covers the 61 completed days before today: 20 Malaysian
 e-commerce customer-support tickets per day (1,220 tickets total), 180
 customers using realistic public email domains, 20 staff members distributed
-across the ten queues, and two administrators. Ticket subjects cover order
+across the nine queues, and two administrators. Ticket subjects cover order
 tracking, payments, returns, marketplace access, product issues, seller tools,
 and similar e-commerce support requests. Synthetic tickets are terminal
 operational history (resolved or closed) and are never a live customer
@@ -80,6 +102,21 @@ python web\manage.py retire_demo_data
 This preserves tickets, prediction records, messages, and audit history for
 operational reporting, changes all synthetic tickets to `CLOSED`, and resets
 the local demo accounts to `DemoP@ssw0rd`. Real tickets are not modified.
+
+## Queue taxonomy migration
+
+The deployed model uses one `Technical Support` destination for both the old
+technical and IT categories. To preview and then apply the one-time database
+merge:
+
+```powershell
+python web\manage.py merge_support_queues
+python web\manage.py merge_support_queues --apply
+```
+
+The migration moves existing tickets and staff assignments, normalizes stored
+prediction labels and reroute history, writes an audit event, and removes the
+obsolete `IT Support` queue. It is safe to run again after the merge.
 
 ## Module seams
 
@@ -124,6 +161,11 @@ GET  /api/model/deployments/
 GET  /api/model/deployments/<joint|separate>/operational/?period=month|quarter|year
 POST /api/model/deployments/<joint|separate>/activate/
 ```
+
+Customer dashboard and ticket-detail responses intentionally omit internal
+routing fields such as priority, queue ownership, model predictions, confidence
+scores, and reroute history. Staff and Admin responses retain those fields for
+ticket handling and review.
 
 The queues-and-staff response keeps two staff collections separate: `staff`
 is filtered by the selected dashboard queue for the directory, while

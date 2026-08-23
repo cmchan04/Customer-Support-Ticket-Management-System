@@ -32,7 +32,6 @@ QUEUE_NAMES = (
     "Product Support",
     "Customer Service",
     "Billing and Payments",
-    "IT Support",
     "Returns and Exchanges",
     "Service Outages and Maintenance",
     "Sales and Pre-Sales",
@@ -83,6 +82,9 @@ SCENARIOS: dict[str, tuple[Scenario, ...]] = {
         Scenario("Unable to sign in to my account", "I cannot sign in to the marketplace app. The sign-in page returns to the login screen after I enter my details.", Ticket.IssueType.INCIDENT),
         Scenario("Checkout page freezes for order {order}", "The checkout page freezes after I select payment for order {order}. I have tried both Wi-Fi and mobile data.", Ticket.IssueType.INCIDENT),
         Scenario("Mobile app crashes when opening my orders", "The app closes whenever I open My Orders. I am using the latest version on my phone.", Ticket.IssueType.PROBLEM),
+        Scenario("Seller portal cannot load inventory page", "The seller portal shows an error when I open the inventory page. I need to update stock for today’s orders.", Ticket.IssueType.INCIDENT),
+        Scenario("Need access to the seller analytics report", "Please grant access to the sales and analytics report for our marketplace seller account.", Ticket.IssueType.REQUEST),
+        Scenario("Two-factor code is not arriving", "I cannot receive the two-factor verification code for the seller portal, so I cannot manage our store.", Ticket.IssueType.INCIDENT),
     ),
     "Product Support": (
         Scenario("{product} received is different from the listing", "Order {order} arrived today, but the {product} does not match the size, colour, or specification shown in the listing.", Ticket.IssueType.INCIDENT),
@@ -98,11 +100,6 @@ SCENARIOS: dict[str, tuple[Scenario, ...]] = {
         Scenario("Charged twice for order {order}", "My card appears to have been charged twice for order {order}. I have attached the two transaction references.", Ticket.IssueType.INCIDENT),
         Scenario("Refund for order {order} has not arrived", "The return for order {order} was approved, but the refund has not appeared in my bank account.", Ticket.IssueType.PROBLEM),
         Scenario("Payment was declined although funds are available", "Payment for order {order} was declined even though my bank confirmed that my card is active.", Ticket.IssueType.INCIDENT),
-    ),
-    "IT Support": (
-        Scenario("Seller portal cannot load inventory page", "The seller portal shows an error when I open the inventory page. I need to update stock for today’s orders.", Ticket.IssueType.INCIDENT),
-        Scenario("Need access to the seller analytics report", "Please grant access to the sales and analytics report for our marketplace seller account.", Ticket.IssueType.REQUEST),
-        Scenario("Two-factor code is not arriving", "I cannot receive the two-factor verification code for the seller portal, so I cannot manage our store.", Ticket.IssueType.INCIDENT),
     ),
     "Returns and Exchanges": (
         Scenario("Request to return order {order}", "I would like to return the {product} from order {order}. The item is unused and still in its original packaging.", Ticket.IssueType.REQUEST),
@@ -131,7 +128,7 @@ SCENARIOS: dict[str, tuple[Scenario, ...]] = {
     ),
 }
 
-QUEUE_WEIGHTS = (16, 11, 16, 16, 10, 10, 5, 5, 3, 8)
+QUEUE_WEIGHTS = (26, 11, 16, 16, 10, 5, 5, 3, 8)
 
 CUSTOMER_NAMES = (
     ("Nur Aisyah", "Rahman"), ("Muhammad Hakim", "Ismail"), ("Siti Nur", "Azman"), ("Ahmad Faris", "Yusof"),
@@ -155,8 +152,8 @@ STAFF_ROSTER = (
     ("Farah", "Ismail", "farah.ismail@yahoo.com", "Customer Service"),
     ("Kavitha", "Devi", "kavitha.devi@gmail.com", "Billing and Payments"),
     ("Lee", "Chen", "lee.chen@outlook.com", "Billing and Payments"),
-    ("Muhammad Amir", "Yusof", "muhammad.amir.yusof@gmail.com", "IT Support"),
-    ("Yap", "Sze Min", "yap.szmin@yahoo.com", "IT Support"),
+    ("Muhammad Amir", "Yusof", "muhammad.amir.yusof@gmail.com", "Technical Support"),
+    ("Yap", "Sze Min", "yap.szmin@yahoo.com", "Technical Support"),
     ("Siti Hawa", "Hassan", "siti.hawa.hassan@outlook.com", "Returns and Exchanges"),
     ("Goh", "Jin Wei", "goh.jinwei@hotmail.com", "Returns and Exchanges"),
     ("Arvind", "Kumar", "arvind.kumar@gmail.com", "Service Outages and Maintenance"),
@@ -633,7 +630,6 @@ class EcommerceDemoSeeder:
             "Product Support": "We are reviewing the item details and the seller listing. We will update you after the comparison is complete.",
             "Customer Service": "We have reviewed the order record and will confirm the next available delivery or account update.",
             "Billing and Payments": "We are checking the payment reference with our billing provider and will update you once the transaction is verified.",
-            "IT Support": "We are reviewing the seller portal access and will provide the next troubleshooting step shortly.",
             "Returns and Exchanges": "We are checking the return request and will share the available collection or exchange arrangement.",
             "Service Outages and Maintenance": "Our technical team is reviewing the affected service. We will share an update once the incident status is confirmed.",
             "Sales and Pre-Sales": "Thank you for your interest. We are preparing the relevant plan and availability details for you.",

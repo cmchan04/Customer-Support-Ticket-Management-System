@@ -1,0 +1,13 @@
+{
+  "archived_previous_files": {
+    "metadata.json": "e516422d324cb9bbd2ee9ca92194a295e79c8ab9a2e279e8a65c1bbf9edf911e",
+    "priority_pipeline.joblib": "c7c5be6bb55ed39d14da079da6e78152d99addbd12658f56a73b9c3d8f6fbd22",
+    "queue_pipeline.joblib": "cc4541e9953d8ccc2075efba99631ee20ba101220c4c4308027ce436f06e4bca"
+  },
+  "family": "separate",
+  "model_version": "2026-08-22T14:12:48.023491+00:00",
+  "promoted_at_utc": "2026-08-22T15:43:48.784891+00:00",
+  "promoted_destination": "E:\\APU\\FYP_TP068983\\artifacts\\models",
+  "promoted_source": "E:\\APU\\FYP_TP068983\\artifacts\\models\\experiments\\merge_it_technical",
+  "training_method": "linear_svm_by_type_and_linear_svm_by_type"
+}

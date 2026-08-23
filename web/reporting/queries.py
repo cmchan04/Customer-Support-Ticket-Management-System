@@ -237,10 +237,10 @@ class DashboardQueries:
         return {ticket.pk for ticket in candidates if DashboardQueries._is_overdue(ticket)}
 
     @staticmethod
-    def _ticket_summary(ticket: Ticket) -> dict[str, object]:
+    def _ticket_summary(ticket: Ticket, *, viewer: User | None = None) -> dict[str, object]:
         snapshot = sla_snapshot(ticket)
         overdue = bool(snapshot["first_reply_breached"] or snapshot["resolution_breached"])
-        return {
+        summary = {
             "id": ticket.pk,
             "reference": ticket.reference,
             "subject": ticket.subject,
@@ -292,6 +292,27 @@ class DashboardQueries:
                 for request in ticket.reroute_requests.all()
             ],
         }
+        if viewer is not None and viewer.role == User.Role.CUSTOMER:
+            # Customers need the lifecycle and conversation but not internal
+            # routing, priority, model, confidence, or escalation evidence.
+            for field in (
+                "queue",
+                "priority",
+                "assignee",
+                "model_family",
+                "model_version",
+                "predicted_queue",
+                "predicted_priority",
+                "routing_failed",
+                "routing_failure_reason",
+                "force_close_reason",
+                "queue_confidence_percent",
+                "priority_confidence_percent",
+                "previous_predictions",
+                "reroute_requests",
+            ):
+                summary.pop(field, None)
+        return summary
 
     def customer_dashboard(self, customer: User, *, page: int | None = None, page_size: int = DEFAULT_PAGE_SIZE) -> dict[str, object]:
         tickets = self._visible_active(self._ticket_queryset(Ticket.objects.filter(customer=customer)))
@@ -315,11 +336,11 @@ class DashboardQueries:
             "active_count": tickets.count(),
             "reply_needed_count": tickets.filter(status=Ticket.Status.WAITING_FOR_CUSTOMER).count(),
             "draft_count": draft_count,
-            "tickets": [self._ticket_summary(ticket) for ticket in rows],
-            "preview_tickets": [self._ticket_summary(ticket) for ticket in preview_rows],
-            "reply_preview": [self._ticket_summary(ticket) for ticket in reply_preview],
+            "tickets": [self._ticket_summary(ticket, viewer=customer) for ticket in rows],
+            "preview_tickets": [self._ticket_summary(ticket, viewer=customer) for ticket in preview_rows],
+            "reply_preview": [self._ticket_summary(ticket, viewer=customer) for ticket in reply_preview],
             "tickets_pagination": pagination,
-            "drafts": [self._ticket_summary(ticket) for ticket in drafts.order_by("-updated_at", "-pk")],
+            "drafts": [self._ticket_summary(ticket, viewer=customer) for ticket in drafts.order_by("-updated_at", "-pk")],
         }
 
     def staff_dashboard(

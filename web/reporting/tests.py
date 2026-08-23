@@ -46,6 +46,47 @@ class DashboardVisibilityTests(TestCase):
         response = self.client.get(reverse("ticket-detail", args=[self.closed.pk]))
         self.assertEqual(response.status_code, 404)
 
+    def test_customer_responses_hide_priority_and_internal_routing_evidence(self):
+        active = Ticket.objects.create(
+            customer=self.customer,
+            subject="Payment needs review",
+            description="The payment page returned an error.",
+            issue_type=Ticket.IssueType.INCIDENT,
+            status=Ticket.Status.OPEN,
+            queue=self.queue,
+            priority=Ticket.Priority.HIGH,
+            predicted_queue=self.queue.name,
+            predicted_priority=Ticket.Priority.HIGH,
+            model_family="joint",
+        )
+
+        customer_summary = DashboardQueries().customer_dashboard(self.customer)["tickets"][0]
+        for field in (
+            "priority",
+            "queue",
+            "predicted_priority",
+            "predicted_queue",
+            "model_family",
+            "queue_confidence_percent",
+            "priority_confidence_percent",
+            "previous_predictions",
+            "reroute_requests",
+        ):
+            self.assertNotIn(field, customer_summary)
+
+        self.client.force_login(self.customer)
+        customer_response = self.client.get(reverse("ticket-detail", args=[active.pk]))
+        self.assertEqual(customer_response.status_code, 200)
+        customer_detail = customer_response.json()
+        self.assertNotIn("priority", customer_detail)
+        self.assertNotIn("queue", customer_detail)
+        self.assertNotIn("predictions", customer_detail)
+
+        self.client.force_login(self.staff)
+        staff_detail = self.client.get(reverse("ticket-detail", args=[active.pk])).json()
+        self.assertEqual(staff_detail["priority"], Ticket.Priority.HIGH)
+        self.assertEqual(staff_detail["queue"], self.queue.name)
+
     def test_drafts_do_not_count_as_operational_backlog(self):
         Ticket.objects.create(
             customer=self.customer,

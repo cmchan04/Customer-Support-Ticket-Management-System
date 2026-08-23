@@ -35,5 +35,5 @@
 #         save_for_comparison_only(search.best_estimator_)
 #
 # The exact artifacts and measured metrics are in this archive's README and
-# artifacts/archive/subject_weighting/. Restore this experiment only if there
+# archive/subject_weighting/. Restore this experiment only if there
 # is a new research reason and evaluate it on a fresh untouched holdout set.

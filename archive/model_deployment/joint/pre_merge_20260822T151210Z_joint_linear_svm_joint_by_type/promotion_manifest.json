@@ -1,0 +1,12 @@
+{
+  "archived_previous_files": {
+    "joint_pipeline.joblib": "bb05064718603179a48672a5bb10ad850c2c3798ffad5fa431aa8f5fac926ad5",
+    "metadata.json": "f9a5283397229d60e1eddf9cd00401c89973d25444a4ef1e1e32e31aa82c72fd"
+  },
+  "family": "joint",
+  "model_version": "2026-08-22T15:12:10.753244+00:00",
+  "promoted_at_utc": "2026-08-22T15:43:48.784891+00:00",
+  "promoted_destination": "E:\\APU\\FYP_TP068983\\artifacts\\models\\joint",
+  "promoted_source": "E:\\APU\\FYP_TP068983\\artifacts\\models\\experiments\\merge_it_technical_joint",
+  "training_method": "linear_svm_joint_by_type"
+}

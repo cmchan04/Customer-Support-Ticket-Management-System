@@ -11,7 +11,6 @@ QUEUE_NAMES = (
     "Product Support",
     "Customer Service",
     "Billing and Payments",
-    "IT Support",
     "Returns and Exchanges",
     "Service Outages and Maintenance",
     "Sales and Pre-Sales",

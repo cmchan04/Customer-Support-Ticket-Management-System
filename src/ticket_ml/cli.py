@@ -9,6 +9,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from ticket_ml.config import TrainingConfig
+from ticket_ml.deployment import promote_merged_models
 from ticket_ml.eda import run_eda
 from ticket_ml.predictor import TicketPredictor
 from ticket_ml.terminal_ui import TerminalMenu
@@ -24,6 +25,10 @@ from ticket_ml.training import (
 
 def _default_config_path() -> Path:
     return Path(__file__).resolve().parents[2] / "configs" / "training.toml"
+
+
+def _default_model_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "artifacts" / "models"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -73,6 +78,20 @@ def _parser() -> argparse.ArgumentParser:
     )
     merge_it_technical_joint.add_argument(
         "--config", type=Path, default=_default_config_path()
+    )
+
+    promote_merged = commands.add_parser(
+        "promote-merged-models",
+        help="Archive current artifacts and promote both validated merged models",
+    )
+    promote_merged.add_argument("--model-root", type=Path, default=_default_model_root())
+    promote_merged.add_argument("--separate-source", type=Path)
+    promote_merged.add_argument("--joint-source", type=Path)
+    promote_merged.add_argument("--archive-root", type=Path)
+    promote_merged.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm replacing fixed artifacts after they are archived",
     )
 
     menu = commands.add_parser(
@@ -150,6 +169,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             cache_dir=base_config.cache_dir / "merge_it_technical_joint_experiment",
         )
         print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+        return 0
+    if args.command == "promote-merged-models":
+        if not args.yes:
+            raise RuntimeError(
+                "Promotion replaces the fixed artifacts after archiving them; rerun with --yes."
+            )
+        results = promote_merged_models(
+            model_root=args.model_root,
+            separate_source=args.separate_source,
+            joint_source=args.joint_source,
+            archive_root=args.archive_root,
+        )
+        print(json.dumps([result.as_dict() for result in results], indent=2, sort_keys=True))
         return 0
     if args.command == "menu":
         TerminalMenu(TrainingConfig.from_toml(args.config)).run()

@@ -127,8 +127,8 @@ active training workflow.
 Its explanation and disabled source snapshot are in
 [`archive/subject_weighting/`](archive/subject_weighting/). The saved pipelines
 and evaluation reports have been moved to
-`artifacts/archive/subject_weighting/`; they are retained only for historical
-comparison and are not loaded by `ticket-ml predict`.
+`archive/subject_weighting/`; they are retained only for historical comparison
+and are not loaded by `ticket-ml predict`.
 
 Run the ticket-type experiment. It uses the customer-selected `Incident`,
 `Request`, `Problem`, or `Change` value, searches type weight, SVM C, and word
@@ -224,9 +224,8 @@ operational destination, run the isolated merge experiment:
 ticket-ml tune-merge-it-technical --config configs\training.toml
 ```
 
-Only the experiment's in-memory label view maps `IT Support` to
-`Technical Support`; the source CSV, production models, and database queues
-are not changed. Reports are written to
+The source CSV remains unchanged, while the promoted deployment and database
+queue taxonomy now map `IT Support` to `Technical Support`. Reports are written to
 `resources/model_output/merge_it_technical_experiment/` and the experimental
 pipelines to `artifacts/models/experiments/merge_it_technical/`.
 
@@ -241,9 +240,10 @@ selected `linear_svm_by_type` for both targets:
 | Priority | 78.58% | 79.35% | 78.19% | 78.98% |
 
 The merge substantially improves the unified Technical Support class, but
-Product Support recall falls from 72.36% to 69.43%. Treat this as evidence for
-an operational review, not as a production replacement. The saved artifacts
-are not loaded by the normal prediction command.
+Product Support recall falls from 72.36% to 69.43%. This trade-off was reviewed
+and the merged separate artifact is now the fixed separate deployment. The
+original ten-class artifacts remain archived and are not overwritten without a
+copy in the archive first.
 
 To test the same label merge with the joint queue-and-priority model, run the
 separate isolated command below. It does not overwrite
@@ -256,8 +256,9 @@ ticket-ml tune-merge-it-technical-joint --config configs\training.toml
 The merged joint artifact is written to
 `artifacts/models/experiments/merge_it_technical_joint/`, while its reports are
 written to `resources/model_output/merge_it_technical_joint_experiment/`.
-This command changes only the in-memory training labels; the source CSV,
-production model, and database queue names remain unchanged.
+This command changes only the in-memory training labels during experimentation;
+the source CSV remains unchanged. The validated merged artifact is now deployed
+and the database queue migration is available through the command below.
 
 The completed seed-29 run selected `linear_svm_joint_by_type` and produced the
 following untouched-holdout comparison with the existing ten-class joint model:
@@ -268,8 +269,46 @@ following untouched-holdout comparison with the existing ten-class joint model:
 | Priority | 80.26% | 80.57% | 79.95% | 80.20% |
 
 Queue accuracy improves by 3.55 percentage points and priority accuracy by
-0.31 points. The merged joint model is still an experiment; it is not selected
-by the application and does not replace either fixed deployment.
+0.31 points. The merged joint artifact is now the fixed joint deployment. The
+active family selected for new submissions is still controlled by the Django
+deployment record; in the current database, Joint remains active and Separate
+remains available as the fixed alternative.
+
+### Migrating the database queue taxonomy
+
+The one-time migration combines existing `IT Support` records with
+`Technical Support`. It moves tickets and staff assignments, normalizes the
+stored prediction labels and reroute history, records an audit event, and
+removes the obsolete queue:
+
+```powershell
+python web\manage.py merge_support_queues
+python web\manage.py merge_support_queues --apply
+```
+
+The first command previews the counts; the second applies the transaction.
+Future demo-data seeders use the nine-queue taxonomy and will not recreate
+`IT Support`.
+
+### Promoting and archiving the merged deployments
+
+The promotion command archives the current fixed artifacts by family and
+training method before replacing the normal deployment paths:
+
+```powershell
+ticket-ml promote-merged-models --model-root artifacts\models --yes
+python web\manage.py sync_model_deployments
+```
+
+The current production paths are `artifacts/models/` for Separate and
+`artifacts/models/joint/` for Joint. All historical material is kept under the
+unified workspace archive: retired experiments are in
+`archive/subject_weighting/`, while previous fixed deployments are in
+`archive/model_deployment/separate/` and
+`archive/model_deployment/joint/`. Each deployment archive contains a
+`promotion_manifest.json`. Existing tickets keep their original
+`model_family`, `model_version`, and prediction record; only future submissions
+use the selected active family and the promoted artifacts.
 
 ### Interactive terminal menu
 

@@ -6,8 +6,17 @@ from .models import Ticket
 from .sla import sla_snapshot
 
 
-def ticket_detail(ticket: Ticket) -> dict[str, object]:
-    return {
+def ticket_detail(ticket: Ticket, *, viewer=None) -> dict[str, object]:
+    """Serialize a ticket with role-aware visibility.
+
+    Queue ownership, priority, model evidence, confidence scores, and
+    reroute history are operational fields for staff and administrators. A
+    customer can see the request lifecycle and conversation, but should not
+    be exposed to those internal routing decisions. Keeping the policy in the
+    serializer protects both the detail endpoint and mutation responses.
+    """
+
+    data = {
         "id": ticket.pk,
         "reference": ticket.reference,
         "subject": ticket.subject,
@@ -71,3 +80,26 @@ def ticket_detail(ticket: Ticket) -> dict[str, object]:
             for request in ticket.reroute_requests.select_related("requested_by").all()
         ],
     }
+
+    if getattr(viewer, "role", None) == "CUSTOMER":
+        for field in (
+            "queue",
+            "priority",
+            "assignee",
+            "model_family",
+            "model_version",
+            "predicted_queue",
+            "predicted_priority",
+            "queue_confidence_percent",
+            "priority_confidence_percent",
+            "confidence_method",
+            "routing_failed",
+            "routing_failure_reason",
+            "force_close_reason",
+            "predictions",
+            "reroute_requests",
+            "previous_predictions",
+        ):
+            data.pop(field, None)
+
+    return data

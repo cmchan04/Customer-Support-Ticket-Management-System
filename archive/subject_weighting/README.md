@@ -29,9 +29,9 @@ accuracy and 80.26% priority accuracy. Its reports are in
 
 - `disabled_training_code.py.disabled` is a commented source snapshot. It is
   documentation only and cannot be imported or run.
-- `artifacts/archive/subject_weighting/models/` contains the two retired Joblib
+- `archive/subject_weighting/models/` contains the two retired Joblib
   pipelines.
-- `artifacts/archive/subject_weighting/reports/` contains the associated plots,
+- `archive/subject_weighting/reports/` contains the associated plots,
   metrics, classification reports, and error-analysis CSV files.
 
 The model binaries remain Git-ignored because they are generated artifacts.
