@@ -7,6 +7,8 @@
   let popoverTimeline;
   let toastTimeline;
   let loginTimeline;
+  let customerFormTimeline;
+  let customerPageTimeline;
   let dialogExiting = false;
 
   function prefersReducedMotion() {
@@ -28,13 +30,143 @@
     elements?.forEach((element) => element.classList.toggle("motion-running", active));
   }
 
+  function animateCustomerRequestForm(requestPage, options = {}) {
+    if (!gsap || !requestPage) return;
+    customerFormTimeline?.kill();
+    customerFormTimeline = null;
+
+    const form = requestPage.querySelector(".customer-request-card");
+    if (!form) return;
+
+    const stepItems = form.querySelectorAll(".customer-request-step");
+    const bodyItems = form.querySelectorAll(
+      ".customer-request-body > .customer-request-copy, "
+      + ".customer-request-body > .customer-request-selection, "
+      + ".customer-request-body > .customer-request-fields, "
+      + ".customer-request-body > .customer-request-review, "
+      + ".customer-request-body > .customer-request-notice, "
+      + ".customer-request-body > .customer-request-actions",
+    );
+    const typeCards = form.querySelectorAll(".customer-request-type");
+    const targets = [form, ...stepItems, ...bodyItems, ...typeCards];
+
+    if (options.skip || prefersReducedMotion()) {
+      showImmediately(targets);
+      markAnimating(targets, false);
+      return;
+    }
+
+    markAnimating(targets, true);
+    customerFormTimeline = gsap.timeline({ defaults: { ease: "power3.out" } });
+    customerFormTimeline.eventCallback("onComplete", () => {
+      showImmediately(targets);
+      markAnimating(targets, false);
+      customerFormTimeline = null;
+    });
+    if (stepItems.length) {
+      customerFormTimeline.fromTo(
+        stepItems,
+        { autoAlpha: 0, y: -4 },
+        { autoAlpha: 1, y: 0, duration: 0.18, stagger: 0.035, clearProps: "opacity,visibility,transform" },
+      );
+    }
+    if (bodyItems.length) {
+      customerFormTimeline.fromTo(
+        bodyItems,
+        { autoAlpha: 0, y: 7 },
+        { autoAlpha: 1, y: 0, duration: 0.22, stagger: 0.04, clearProps: "opacity,visibility,transform" },
+        stepItems.length ? "<0.07" : 0,
+      );
+    }
+    if (typeCards.length) {
+      customerFormTimeline.fromTo(
+        typeCards,
+        { autoAlpha: 0, y: 6 },
+        { autoAlpha: 1, y: 0, duration: 0.2, stagger: 0.04, clearProps: "opacity,visibility,transform" },
+        "<0.08",
+      );
+    }
+  }
+
+  function animateCustomerPage(root, customerPage, options = {}) {
+    if (!gsap || !root || !customerPage) return;
+    customerPageTimeline?.kill();
+    customerPageTimeline = null;
+
+    const sections = Array.from(customerPage.children).filter((element) => !element.hidden);
+    const rows = customerPage.querySelectorAll(".customer-ticket-row");
+    const targets = [...sections, ...rows];
+    const isHome = customerPage.classList.contains("customer-home");
+    const direction = isHome ? -1 : 1;
+
+    if (options.skip || prefersReducedMotion()) {
+      showImmediately(targets);
+      markAnimating(targets, false);
+      root.classList.remove("motion-running");
+      return;
+    }
+
+    root.classList.add("motion-running");
+    markAnimating(targets, true);
+    customerPageTimeline = gsap.timeline({ defaults: { ease: "power3.out" } });
+    customerPageTimeline.eventCallback("onComplete", () => {
+      showImmediately(targets);
+      markAnimating(targets, false);
+      root.classList.remove("motion-running");
+      customerPageTimeline = null;
+    });
+    if (sections.length) {
+      customerPageTimeline.fromTo(
+        sections,
+        { autoAlpha: 0, x: direction * 12, y: 7 },
+        { autoAlpha: 1, x: 0, y: 0, duration: 0.34, stagger: 0.07, clearProps: "opacity,visibility,transform" },
+      );
+    }
+    if (rows.length) {
+      customerPageTimeline.fromTo(
+        rows,
+        { autoAlpha: 0, y: 5 },
+        { autoAlpha: 1, y: 0, duration: 0.2, stagger: 0.035, clearProps: "opacity,visibility,transform" },
+        "<0.14",
+      );
+    }
+  }
+
   function animatePage(root, options = {}) {
     if (!gsap || !root) return;
     pageTimeline?.kill();
+    customerPageTimeline?.kill();
+    customerPageTimeline = null;
+    customerFormTimeline?.kill();
+    customerFormTimeline = null;
 
-    const sections = Array.from(root.children).filter((element) => (
-      !element.matches(".ticket-dialog-backdrop") && !element.hidden
+    const customerPage = Array.from(root.children).find((element) => (
+      element.matches(".customer-home, .customer-my-tickets-page, .customer-request-page") && !element.hidden
     ));
+    const sections = customerPage
+      ? Array.from(customerPage.children).filter((element) => !element.hidden)
+      : Array.from(root.children).filter((element) => (
+        !element.matches(".ticket-dialog-backdrop") && !element.hidden
+      ));
+    const isCustomerHomeOrTickets = customerPage?.matches(".customer-home, .customer-my-tickets-page");
+    const isCustomerRequest = customerPage?.classList.contains("customer-request-page");
+
+    // Home and My requests use a short, directional entrance so the destination
+    // is clear without animating the surrounding shell or top navigation.
+    if (isCustomerHomeOrTickets) {
+      animateCustomerPage(root, customerPage, options);
+      return;
+    }
+
+    // Keep the request page frame, heading, and guidance card fixed. Animate
+    // only the fields inside the form when the step changes.
+    if (isCustomerRequest) {
+      showImmediately(sections);
+      root.classList.remove("motion-running");
+      animateCustomerRequestForm(customerPage, options);
+      return;
+    }
+
     if (!sections.length || options.skip || prefersReducedMotion()) {
       showImmediately(sections);
       root.classList.remove("motion-running");
@@ -52,7 +184,7 @@
     pageTimeline.fromTo(
       sections,
       { autoAlpha: 0, y: 14 },
-      { autoAlpha: 1, y: 0, stagger: 0.045, clearProps: "opacity,visibility,transform" },
+      { autoAlpha: 1, x: 0, y: 0, stagger: 0.045, clearProps: "opacity,visibility,transform" },
     );
 
     const metricValues = root.querySelectorAll(".metric-value, .compare-stat, .queue-count strong, .performance-total");
@@ -136,6 +268,25 @@
     });
     dialogTimeline.to(dialog, { autoAlpha: 0, y: 8, scale: 0.995, duration: 0.16 });
     dialogTimeline.to(backdrop, { autoAlpha: 0, duration: 0.14 }, "<0.03");
+  }
+
+  function animateCustomerChoice(root) {
+    if (!gsap || !root || prefersReducedMotion()) return;
+    const selected = root.querySelector(".customer-request-type.is-selected");
+    if (!selected) return;
+    const check = selected.querySelector(".customer-request-type-check");
+    gsap.fromTo(
+      selected,
+      { y: 4, scale: 0.985 },
+      { y: 0, scale: 1, duration: 0.22, ease: "power2.out", clearProps: "transform" },
+    );
+    if (check) {
+      gsap.fromTo(
+        check,
+        { scale: 0.7, autoAlpha: 0.35 },
+        { scale: 1, autoAlpha: 1, duration: 0.2, ease: "back.out(1.7)", clearProps: "transform,opacity,visibility" },
+      );
+    }
   }
 
   function animateAccountMenu(menu, open) {
@@ -222,6 +373,7 @@
 
   window.ticketMotion = {
     animatePage,
+    animateCustomerChoice,
     animateDialog,
     animateDialogExit,
     animateAccountMenu,

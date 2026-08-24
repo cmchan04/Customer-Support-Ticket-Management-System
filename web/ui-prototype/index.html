@@ -6,7 +6,7 @@
     <meta name="description" content="Desktop UI prototype for the customer support ticket system." />
     <title>Solve Your Inquiries — Customer Support</title>
     <!-- DJANGO:BASE -->
-    <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260823-calm-guided-home-v3" />
   </head>
   <body>
     <section id="login-screen" class="login-screen" aria-labelledby="login-title">
@@ -45,7 +45,7 @@
 
     <div class="app-shell" hidden>
       <aside class="sidebar" aria-label="Primary navigation">
-        <a class="brand" href="#" data-action="go-dashboard" aria-label="Return to dashboard">
+        <a class="brand" href="#" data-action="go-dashboard" aria-label="Return to workspace home">
           <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
           <span>
             <strong>Solve Your Inquiries</strong>
@@ -112,7 +112,9 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <!-- DJANGO:SESSION -->
     <script src="vendor/gsap.min.js"></script>
-    <script src="motion.js"></script>
-    <script src="app.js"></script>
+    <script src="motion.js?v=20260823-customer-motion-v5"></script>
+    <!-- Bump this version when the UI bundle changes so browsers do not keep
+         an older customer table layout from cache during local testing. -->
+    <script src="app.js?v=20260823-guided-request-v5"></script>
   </body>
 </html>

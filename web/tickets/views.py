@@ -57,7 +57,10 @@ def _visible_to(user: User, ticket: Ticket) -> bool:
     if user.role == User.Role.ADMIN:
         return True
     if ticket.status == Ticket.Status.CLOSED:
-        return False
+        # Closed work leaves active staff lists, but the assigned staff member
+        # can still open its read-only conversation from Performance for
+        # service review. Customers remain unable to view closed tickets.
+        return user.role == User.Role.STAFF and ticket.assigned_to_id == user.pk
     if user.role == User.Role.CUSTOMER:
         return ticket.customer_id == user.pk
     if user.role == User.Role.STAFF:

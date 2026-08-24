@@ -4,7 +4,7 @@ const roleDefinitions = {
     title: "Customer account",
     initials: "ML",
     nav: [
-      ["01", "Dashboard", "dashboard"],
+      ["01", "Home", "dashboard"],
       ["02", "New ticket", "new-ticket"],
       ["03", "My tickets", "tickets"],
     ],
@@ -82,6 +82,9 @@ const state = {
   activeDraftId: null,
   customerFormRequestKey: "",
   customerActionPending: false,
+  customerRequestStep: 1,
+  customerRequestValues: null,
+  customerRequestError: "",
   emptyDraftPrompt: false,
   pendingClosureTicketIds: new Set(),
   customerResolutionDates: new Map([["TKT-000104", "2026-08-17T09:00:00"]]),
@@ -124,7 +127,6 @@ const customerTickets = [
   {
     id: "TKT-000128",
     subject: "Unable to access the staff portal",
-    priority: "High",
     status: ["Waiting for Customer", "waiting"],
     updated: "18 min ago",
     updatedDetail: "18 minutes ago",
@@ -134,7 +136,6 @@ const customerTickets = [
   {
     id: "TKT-000121",
     subject: "Please update my billing address",
-    priority: "Medium",
     status: ["Waiting for Support", "waiting"],
     updated: "Yesterday",
     updatedDetail: "Yesterday",
@@ -144,7 +145,6 @@ const customerTickets = [
   {
     id: "TKT-000107",
     subject: "Request for a service quotation",
-    priority: "Low",
     status: ["Closed", "resolved"],
     updated: "12 Aug",
     updatedDetail: "12 August",
@@ -237,10 +237,12 @@ const serverAdminAttentionTickets = [];
 
 const adminQueueOptions = ["Technical Support", "Product Support", "Customer Service", "Billing and Payments"];
 const adminPriorityOptions = ["High", "Medium", "Low"];
-const staffQueueOptions = ["Technical Support", "Product Support", "Customer Service", "Billing and Payments", "IT Support", "Returns and Exchanges", "Service Outages and Maintenance", "Sales and Pre-Sales", "Human Resources", "General Inquiry"];
+const staffQueueOptions = ["Technical Support", "Product Support", "Customer Service", "Billing and Payments", "Returns and Exchanges", "Service Outages and Maintenance", "Sales and Pre-Sales", "Human Resources", "General Inquiry"];
 const staffUsers = [
   { id: "staff-arun-patel", firstName: "Arun", lastName: "Patel", email: "arun.patel@outlook.com", phone: "+60 12-456 7890", queue: "Technical Support", title: "Support specialist", status: "Available", activeTickets: 4, waitingReply: 1, resolved: { today: { count: 2, sla: "100%", time: "2 h 18 min" }, week: { count: 11, sla: "94%", time: "2 h 47 min" }, month: { count: 43, sla: "92%", time: "3 h 06 min" } } },
   { id: "staff-siti-aziz", firstName: "Siti", lastName: "Aziz", email: "siti.aziz@yahoo.com", phone: "+60 12-321 7788", queue: "Technical Support", title: "Support specialist", status: "In a ticket", activeTickets: 5, waitingReply: 2, resolved: { today: { count: 3, sla: "100%", time: "2 h 11 min" }, week: { count: 14, sla: "96%", time: "2 h 38 min" }, month: { count: 51, sla: "93%", time: "2 h 59 min" } } },
+  { id: "staff-muhammad-amir", firstName: "Muhammad Amir", lastName: "Yusof", email: "muhammad.amir.yusof@gmail.com", phone: "+60 12-733 2184", queue: "Technical Support", title: "Technical support specialist", status: "Available", activeTickets: 3, waitingReply: 1, resolved: { today: { count: 2, sla: "100%", time: "2 h 31 min" }, week: { count: 10, sla: "93%", time: "2 h 58 min" }, month: { count: 37, sla: "91%", time: "3 h 20 min" } } },
+  { id: "staff-yap-sze-min", firstName: "Yap", lastName: "Sze Min", email: "yap.szmin@yahoo.com", phone: "+60 12-841 4056", queue: "Technical Support", title: "Technical support specialist", status: "Available", activeTickets: 2, waitingReply: 0, resolved: { today: { count: 1, sla: "100%", time: "2 h 44 min" }, week: { count: 8, sla: "92%", time: "3 h 06 min" }, month: { count: 30, sla: "90%", time: "3 h 28 min" } } },
   { id: "staff-priya-nair", firstName: "Priya", lastName: "Nair", email: "priya.nair@outlook.com", phone: "+60 12-765 3301", queue: "Product Support", title: "Product support analyst", status: "Available", activeTickets: 3, waitingReply: 0, resolved: { today: { count: 2, sla: "100%", time: "2 h 41 min" }, week: { count: 9, sla: "95%", time: "3 h 02 min" }, month: { count: 36, sla: "91%", time: "3 h 22 min" } } },
   { id: "staff-james-wong", firstName: "James", lastName: "Wong", email: "james.wong@hotmail.com", phone: "+60 12-210 8843", queue: "Product Support", title: "Product support analyst", status: "Away", activeTickets: 4, waitingReply: 1, resolved: { today: { count: 1, sla: "100%", time: "2 h 55 min" }, week: { count: 8, sla: "92%", time: "3 h 15 min" }, month: { count: 31, sla: "90%", time: "3 h 36 min" } } },
   { id: "staff-nur-aina", firstName: "Nur", lastName: "Aina", email: "nur.aina.azman@gmail.com", phone: "+60 12-918 4421", queue: "Customer Service", title: "Customer service specialist", status: "Available", activeTickets: 2, waitingReply: 0, resolved: { today: { count: 4, sla: "100%", time: "1 h 49 min" }, week: { count: 16, sla: "97%", time: "2 h 09 min" }, month: { count: 62, sla: "95%", time: "2 h 28 min" } } },
@@ -253,11 +255,10 @@ const staffUsers = [
 // filter can never hide valid assignees for another route queue.
 const assignmentStaffUsers = staffUsers.map((user) => ({ ...user }));
 const queueDashboardMetrics = [
-  { queue: "Technical Support", backlog: 18, unassigned: 6, highPriority: 3, sla: "92%" },
+  { queue: "Technical Support", backlog: 25, unassigned: 9, highPriority: 4, sla: "92%" },
   { queue: "Product Support", backlog: 14, unassigned: 4, highPriority: 2, sla: "94%" },
   { queue: "Customer Service", backlog: 13, unassigned: 3, highPriority: 1, sla: "95%" },
   { queue: "Billing and Payments", backlog: 10, unassigned: 2, highPriority: 2, sla: "91%" },
-  { queue: "IT Support", backlog: 7, unassigned: 3, highPriority: 1, sla: "93%" },
   { queue: "Returns and Exchanges", backlog: 6, unassigned: 1, highPriority: 0, sla: "96%" },
   { queue: "Service Outages and Maintenance", backlog: 5, unassigned: 2, highPriority: 2, sla: "89%" },
   { queue: "Sales and Pre-Sales", backlog: 4, unassigned: 1, highPriority: 0, sla: "97%" },
@@ -300,17 +301,17 @@ const modelPerformance = {
     operationalPeriods: {
       month: {
         label: "This month",
-        queuePredictions: [["Technical Support", 43], ["Product Support", 28], ["Customer Service", 21], ["IT Support", 17], ["Billing and Payments", 14], ["Returns and Exchanges", 7], ["Service Outages and Maintenance", 6], ["Sales and Pre-Sales", 5], ["Human Resources", 3], ["General Inquiry", 2]],
+        queuePredictions: [["Technical Support", 60], ["Product Support", 28], ["Customer Service", 21], ["Billing and Payments", 14], ["Returns and Exchanges", 7], ["Service Outages and Maintenance", 6], ["Sales and Pre-Sales", 5], ["Human Resources", 3], ["General Inquiry", 2]],
         priorityPredictions: [["High", 57], ["Medium", 59], ["Low", 30]],
       },
       quarter: {
         label: "This quarter",
-        queuePredictions: [["Technical Support", 123], ["Product Support", 80], ["Customer Service", 62], ["IT Support", 50], ["Billing and Payments", 41], ["Returns and Exchanges", 21], ["Service Outages and Maintenance", 18], ["Sales and Pre-Sales", 13], ["Human Resources", 9], ["General Inquiry", 6]],
+        queuePredictions: [["Technical Support", 173], ["Product Support", 80], ["Customer Service", 62], ["Billing and Payments", 41], ["Returns and Exchanges", 21], ["Service Outages and Maintenance", 18], ["Sales and Pre-Sales", 13], ["Human Resources", 9], ["General Inquiry", 6]],
         priorityPredictions: [["High", 165], ["Medium", 171], ["Low", 87]],
       },
       year: {
         label: "This year",
-        queuePredictions: [["Technical Support", 373], ["Product Support", 242], ["Customer Service", 189], ["IT Support", 153], ["Billing and Payments", 125], ["Returns and Exchanges", 64], ["Service Outages and Maintenance", 53], ["Sales and Pre-Sales", 40], ["Human Resources", 27], ["General Inquiry", 18]],
+        queuePredictions: [["Technical Support", 526], ["Product Support", 242], ["Customer Service", 189], ["Billing and Payments", 125], ["Returns and Exchanges", 64], ["Service Outages and Maintenance", 53], ["Sales and Pre-Sales", 40], ["Human Resources", 27], ["General Inquiry", 18]],
         priorityPredictions: [["High", 500], ["Medium", 520], ["Low", 264]],
       },
     },
@@ -339,17 +340,17 @@ const modelPerformance = {
     operationalPeriods: {
       month: {
         label: "This month",
-        queuePredictions: [["Technical Support", 27], ["Product Support", 18], ["Customer Service", 14], ["IT Support", 11], ["Billing and Payments", 9], ["Returns and Exchanges", 5], ["Service Outages and Maintenance", 4], ["Sales and Pre-Sales", 3], ["Human Resources", 2], ["General Inquiry", 1]],
+        queuePredictions: [["Technical Support", 38], ["Product Support", 18], ["Customer Service", 14], ["Billing and Payments", 9], ["Returns and Exchanges", 5], ["Service Outages and Maintenance", 4], ["Sales and Pre-Sales", 3], ["Human Resources", 2], ["General Inquiry", 1]],
         priorityPredictions: [["High", 37], ["Medium", 38], ["Low", 19]],
       },
       quarter: {
         label: "This quarter",
-        queuePredictions: [["Technical Support", 79], ["Product Support", 51], ["Customer Service", 40], ["IT Support", 33], ["Billing and Payments", 27], ["Returns and Exchanges", 14], ["Service Outages and Maintenance", 11], ["Sales and Pre-Sales", 9], ["Human Resources", 6], ["General Inquiry", 4]],
+        queuePredictions: [["Technical Support", 112], ["Product Support", 51], ["Customer Service", 40], ["Billing and Payments", 27], ["Returns and Exchanges", 14], ["Service Outages and Maintenance", 11], ["Sales and Pre-Sales", 9], ["Human Resources", 6], ["General Inquiry", 4]],
         priorityPredictions: [["High", 107], ["Medium", 111], ["Low", 56]],
       },
       year: {
         label: "This year",
-        queuePredictions: [["Technical Support", 239], ["Product Support", 155], ["Customer Service", 122], ["IT Support", 98], ["Billing and Payments", 81], ["Returns and Exchanges", 41], ["Service Outages and Maintenance", 34], ["Sales and Pre-Sales", 26], ["Human Resources", 18], ["General Inquiry", 12]],
+        queuePredictions: [["Technical Support", 337], ["Product Support", 155], ["Customer Service", 122], ["Billing and Payments", 81], ["Returns and Exchanges", 41], ["Service Outages and Maintenance", 34], ["Sales and Pre-Sales", 26], ["Human Resources", 18], ["General Inquiry", 12]],
         priorityPredictions: [["High", 321], ["Medium", 334], ["Low", 171]],
       },
     },
@@ -437,7 +438,11 @@ function shouldRefreshRolePage(page = state.page) {
 }
 
 function refreshAfterPageNavigation() {
-  if (shouldRefreshRolePage()) void refreshServerData();
+  // Navigation renders immediately so the destination feels responsive. The
+  // server refresh that follows must not replace that entrance animation with
+  // a no-animation render when its response arrives (which is especially
+  // noticeable on the fast local development server).
+  if (shouldRefreshRolePage()) void refreshServerData({ animatePage: true });
 }
 
 function getServerCsrfToken() {
@@ -665,7 +670,7 @@ function mapServerSummaryRows(rows) {
   return (rows || []).map(normalizeServerTicket);
 }
 
-async function refreshServerData({ renderAfter = true } = {}) {
+async function refreshServerData({ renderAfter = true, animatePage = false } = {}) {
   if (!serverSessionIsActive()) return;
   state.serverLoading = true;
   state.serverError = "";
@@ -780,12 +785,16 @@ async function refreshServerData({ renderAfter = true } = {}) {
       })));
     }
     state.serverLoading = false;
-    if (renderAfter) render({ skipPageAnimation: true });
+    if (renderAfter) {
+      render({ skipPageAnimation: !animatePage, forcePageAnimation: animatePage });
+    }
   } catch (error) {
     state.serverLoading = false;
     state.serverError = error.message || "Unable to load the support workspace.";
     showToast(state.serverError);
-    if (renderAfter) render({ skipPageAnimation: true });
+    if (renderAfter) {
+      render({ skipPageAnimation: !animatePage, forcePageAnimation: animatePage });
+    }
   }
 }
 
@@ -1281,7 +1290,7 @@ function pageTitle() {
   if (state.page === "models" && state.modelDashboard) return `Model centre / ${modelPerformance[state.modelDashboard].name}`;
   const definition = roleDefinitions[state.role];
   const match = definition.nav.find((item) => item[2] === state.page);
-  return match ? match[1] : "Dashboard";
+  return match ? match[1] : state.role === "customer" ? "Home" : "Dashboard";
 }
 
 function setRole(role) {
@@ -1304,7 +1313,10 @@ function setRole(role) {
 }
 
 function getRenderPageKey() {
-  return [state.role, state.page, state.modelDashboard || ""].join(":");
+  const requestStep = state.role === "customer" && state.page === "new-ticket"
+    ? String(state.customerRequestStep || 1)
+    : "";
+  return [state.role, state.page, state.modelDashboard || "", requestStep].join(":");
 }
 
 function getRenderDialogKey() {
@@ -1334,12 +1346,16 @@ function render(options = {}) {
       : `${getProfileDisplayName(getActiveProfile())} · ${roleDefinitions.admin.title}`;
   const routingRail = document.querySelector(".routing-rail");
   routingRail.hidden = isCustomer;
+  // Keep the rendered role separate from the role-switch buttons. Using
+  // `data-role` here made every click bubble to the role-switch handler.
+  appShell.dataset.userRole = state.role;
   document.querySelector(".topbar").classList.toggle("customer-topbar", isCustomer);
   renderAccountMenu();
   main.innerHTML = renderPage();
   main.focus({ preventScroll: true });
-  const skipPageAnimation = options.skipPageAnimation || Boolean(dialogKey);
-  if (pageChanged && !skipPageAnimation) window.ticketMotion?.animatePage(main);
+  const forcePageAnimation = Boolean(options.forcePageAnimation);
+  const skipPageAnimation = Boolean(dialogKey) || (Boolean(options.skipPageAnimation) && !forcePageAnimation);
+  if ((pageChanged || forcePageAnimation) && !skipPageAnimation) window.ticketMotion?.animatePage(main);
   else window.ticketMotion?.animatePage(main, { skip: true });
   if (dialogChanged && dialogKey) window.ticketMotion?.animateDialog(main);
   lastRenderPageKey = pageKey;
@@ -1384,6 +1400,42 @@ function getTicketFormValues(form) {
   };
 }
 
+function customerRequestValuesFromDraft(draft = null) {
+  return {
+    subject: draft?.subject ?? "",
+    body: draft?.body ?? "",
+    issueChoice: draft?.issueChoice ?? "",
+  };
+}
+
+function resetCustomerRequest(values = null) {
+  state.customerRequestStep = 1;
+  state.customerRequestValues = values || customerRequestValuesFromDraft();
+  state.customerRequestError = "";
+}
+
+function currentCustomerRequestValues(draft = null) {
+  if (!state.customerRequestValues) state.customerRequestValues = customerRequestValuesFromDraft(draft);
+  return state.customerRequestValues;
+}
+
+function syncCustomerRequestValues(form) {
+  if (!form) return currentCustomerRequestValues();
+  const values = getTicketFormValues(form);
+  state.customerRequestValues = {
+    subject: values.subject,
+    body: values.body,
+    issueChoice: values.issueChoice,
+  };
+  return state.customerRequestValues;
+}
+
+function showCustomerRequestError(message, fieldId = "") {
+  state.customerRequestError = message;
+  render();
+  if (fieldId) window.setTimeout(() => document.querySelector(`#${fieldId}`)?.focus(), 0);
+}
+
 function issueTypeForChoice(value) {
   return {
     stopped_working: "Incident",
@@ -1411,6 +1463,7 @@ async function saveCustomerDraft(form) {
       });
       state.activeDraftId = null;
       state.customerFormRequestKey = "";
+      resetCustomerRequest();
       state.emptyDraftPrompt = false;
       state.page = "tickets";
       await refreshServerData({ renderAfter: false });
@@ -1436,6 +1489,7 @@ async function saveCustomerDraft(form) {
   if (!existingDraft) customerDrafts.unshift(draft);
   state.activeDraftId = null;
   state.customerFormRequestKey = "";
+  resetCustomerRequest();
   state.emptyDraftPrompt = false;
   state.page = "tickets";
   render();
@@ -1498,6 +1552,11 @@ async function openCustomerTicket(ticketId) {
 }
 
 async function openStaffTicket(ticketId) {
+  // Performance review is an in-place inspection workflow. Keep the current
+  // pane mounted so the staff member can close the dialog and continue where
+  // they were reviewing resolved work.
+  const originPage = state.page;
+  const dialogPage = originPage === "performance" ? "performance" : "assigned";
   if (serverSessionIsActive()) {
     let staffTicket = getStaffTicket(ticketId);
     if (!staffTicket) {
@@ -1511,7 +1570,7 @@ async function openStaffTicket(ticketId) {
       showToast("That ticket is no longer assigned to your desk.");
       return;
     }
-    state.page = "assigned";
+    state.page = dialogPage;
     state.customerTicketDialog = null;
     state.staffTicketDialog = ticketId;
     render({ skipPageAnimation: true });
@@ -1522,7 +1581,7 @@ async function openStaffTicket(ticketId) {
     showToast("That ticket is no longer assigned to your desk.");
     return;
   }
-  state.page = "assigned";
+  state.page = dialogPage;
   state.customerTicketDialog = null;
   state.staffTicketDialog = ticketId;
   render();
@@ -1658,6 +1717,7 @@ async function submitServerCustomerTicket(form) {
     });
     state.activeDraftId = null;
     state.customerFormRequestKey = "";
+    resetCustomerRequest();
     state.page = "tickets";
     await refreshServerData({ renderAfter: false });
     render();
@@ -1939,9 +1999,11 @@ async function activateServerModel(family) {
 }
 
 function continueCustomerDraft(draftId) {
+  const draft = getCustomerDrafts().find((item) => item.id === draftId);
   state.customerTicketDialog = null;
   state.customerFormRequestKey = createCustomerRequestKey();
   state.activeDraftId = draftId;
+  resetCustomerRequest(customerRequestValuesFromDraft(draft));
   state.emptyDraftPrompt = false;
   state.page = "new-ticket";
   render();
@@ -1954,31 +2016,74 @@ function renderCustomerTicketAction(ticket) {
   return `<button class="button secondary row-action" type="button" data-action="mark-customer-resolved" data-ticket-id="${ticket.id}">Mark as resolved</button>`;
 }
 
+function renderCustomerGuidedHero() {
+  return `
+    <section class="customer-guided-hero" aria-labelledby="customer-guided-hero-title">
+      <div class="customer-guided-hero__lead">
+        <span class="customer-guided-hero__sun" aria-hidden="true"></span>
+        <span class="eyebrow">Your support space</span>
+        <h1 id="customer-guided-hero-title">A clear next step starts here.</h1>
+        <p>Ask a question, report a problem, or make a request. We will keep the conversation simple and keep you updated along the way.</p>
+        <div class="customer-guided-hero__actions">
+          <button class="button customer-guided-hero__primary-action" type="button" data-action="new-ticket">Start a new request <span aria-hidden="true">→</span></button>
+          <button class="button customer-guided-hero__secondary-action" type="button" data-page="tickets">Check my requests</button>
+        </div>
+      </div>
+      <aside class="customer-guided-hero__journey" aria-labelledby="customer-journey-title">
+        <span class="eyebrow">What happens next</span>
+        <h2 id="customer-journey-title">Support without the runaround.</h2>
+        <p>Every request follows one calm, visible path.</p>
+        <ol class="customer-journey-list">
+          <li class="is-current"><span>1</span><div><strong>Tell us what happened</strong><p>Choose the closest description and add the important details.</p></div></li>
+          <li><span>2</span><div><strong>We find the right help</strong><p>Your request reaches the support team that can assist you.</p></div></li>
+          <li><span>3</span><div><strong>Follow the conversation</strong><p>Reply when needed and see every update in one place.</p></div></li>
+        </ol>
+      </aside>
+    </section>`;
+}
+
+function renderCustomerHomeWelcome(replyTicket) {
+  const firstName = escapeHtml(getActiveProfile().firstName);
+  const hasReplyWaiting = Boolean(replyTicket);
+  const noticeCopy = hasReplyWaiting
+    ? `<strong>A reply is waiting from you.</strong> Share a little more information so support can keep moving.`
+    : `<strong>No reply is waiting from you.</strong> Your active tickets will appear here as the support team works on them.`;
+  const action = hasReplyWaiting
+    ? `<button class="button secondary customer-home-notice__action" type="button" data-action="view-customer-ticket" data-ticket-id="${escapeHtml(replyTicket.id)}">Reply now</button>`
+    : "";
+  return `
+    <section class="customer-home-intro" aria-labelledby="customer-home-welcome-title">
+      <div class="customer-home-welcome">
+        <span class="eyebrow">Good morning, ${firstName}</span>
+        <h2 id="customer-home-welcome-title">What needs attention?</h2>
+        <p>Submit a request, follow a reply, or check the progress of an open ticket.</p>
+      </div>
+      <div class="customer-home-notice${hasReplyWaiting ? " is-action" : ""}" role="status">
+        <span class="customer-home-notice__icon" aria-hidden="true">${hasReplyWaiting ? "↗" : "✓"}</span>
+        <span class="customer-home-notice__copy">${noticeCopy}</span>
+        ${action}
+      </div>
+    </section>`;
+}
+
 function renderCustomer() {
   if (state.page === "new-ticket") return renderNewTicket();
   if (state.page === "tickets") {
     return `
-      <div class="page-heading"><div><h1>My tickets</h1><p>Drafts appear first, followed by every submitted request and its latest status.</p></div><div class="heading-actions"><button class="button signal" data-action="new-ticket">Create ticket</button></div></div>
-      ${renderCustomerTable("all")}
+      <div class="customer-my-tickets-page">
+        <div class="page-heading"><div><h1>My tickets</h1><p>Drafts appear first, followed by every submitted request and its latest status.</p></div><div class="heading-actions"><button class="button signal" data-action="new-ticket">Create ticket</button></div></div>
+        ${renderCustomerTable("all")}
+      </div>
       ${state.customerTicketDialog ? renderCustomerTicketDialog(state.customerTicketDialog) : ""}`;
   }
-  const serverCustomer = state.serverData.customer;
-  const activeCount = serverSessionIsActive() && serverCustomer
-    ? Number(serverCustomer.active_count || 0)
-    : getCustomerActiveTickets().length;
-  const replyCount = serverSessionIsActive() && serverCustomer
-    ? Number(serverCustomer.reply_needed_count || 0)
-    : getCustomerReplyCount();
   const replyTicket = (serverSessionIsActive() ? customerReplyPreviewTickets : getCustomerActiveTickets())
     .find((ticket) => getCustomerTicketStatus(ticket)[0] === "Waiting for Customer");
-  const nextStep = replyTicket
-    ? `<section class="model-banner"><div class="model-token">01</div><div><strong>Your next step: reply to ${escapeHtml(replyTicket.id)}</strong><p>A support specialist has requested more information before continuing.</p></div><div class="model-banner-actions"><button class="button secondary" data-action="view-customer-ticket" data-ticket-id="${escapeHtml(replyTicket.id)}">View ticket</button></div></section>`
-    : `<section class="notice customer-dashboard-empty"><span aria-hidden="true">✓</span><span><strong>No reply is waiting from you.</strong> Your active tickets will appear here as the support team works on them.</span></section>`;
   return `
-    <div class="page-heading"><div><span class="eyebrow">Good morning, ${escapeHtml(getActiveProfile().firstName)}</span><h1>What needs attention?</h1><p>Submit a request, follow a reply, or check the progress of an open ticket.</p></div><div class="heading-actions"><button class="button signal" data-action="new-ticket">Create ticket</button></div></div>
-    ${nextStep}
-    <section class="metric-grid customer-metric-grid"><article class="metric-card"><span class="eyebrow">Active tickets</span><strong class="metric-value">${activeCount}</strong><span class="metric-footer">Requests currently being handled</span></article><article class="metric-card"><span class="eyebrow">Your reply needed</span><strong class="metric-value">${replyCount}</strong><span class="metric-footer"><span class="trend warn">Action</span> Send more details</span></article></section>
-    ${renderCustomerTable("active")}`;
+    <div class="customer-home">
+      ${renderCustomerGuidedHero()}
+      ${renderCustomerHomeWelcome(replyTicket)}
+      ${renderCustomerTable("active")}
+    </div>`;
 }
 
 function getTicketUpdatedTimestamp(ticket) {
@@ -2134,15 +2239,16 @@ function renderCustomerTable(scope) {
     if (record.kind === "draft") {
       const { draft } = record;
       const draftSubject = draft.subject || "Untitled draft";
-      return `<tr class="customer-ticket-row draft-ticket-row" tabindex="0" role="button" data-action="continue-draft" data-draft-id="${escapeHtml(draft.id)}" aria-label="Continue draft ${escapeHtml(draftSubject)}"><td><span class="ticket-code">${escapeHtml(draft.id)}</span></td><td><span class="ticket-subject">${escapeHtml(draftSubject)}</span></td><td class="muted">—</td><td>${status("Draft", "draft")}</td><td class="muted">${escapeHtml(draft.updated)}</td><td><div class="draft-actions"><button class="button text" type="button" data-action="continue-draft" data-draft-id="${escapeHtml(draft.id)}">Continue</button><button class="button text danger-text" type="button" data-action="discard-draft" data-draft-id="${escapeHtml(draft.id)}">Discard</button></div></td></tr>`;
+      return `<tr class="customer-ticket-row draft-ticket-row" tabindex="0" role="button" data-action="continue-draft" data-draft-id="${escapeHtml(draft.id)}" aria-label="Continue draft ${escapeHtml(draftSubject)}"><td><span class="ticket-code">${escapeHtml(draft.id)}</span></td><td><span class="ticket-subject">${escapeHtml(draftSubject)}</span></td><td>${status("Draft", "draft")}</td><td class="muted">${escapeHtml(draft.updated)}</td><td><div class="draft-actions"><button class="button text" type="button" data-action="continue-draft" data-draft-id="${escapeHtml(draft.id)}">Continue</button><button class="button text danger-text" type="button" data-action="discard-draft" data-draft-id="${escapeHtml(draft.id)}">Discard</button></div></td></tr>`;
     }
     const { ticket } = record;
     const [statusLabel, statusTone] = getCustomerTicketStatus(ticket);
-    return `<tr class="customer-ticket-row" tabindex="0" role="button" data-action="view-customer-ticket" data-ticket-id="${escapeHtml(ticket.id)}" aria-label="Open ${escapeHtml(ticket.id)}: ${escapeHtml(ticket.subject)}"><td><span class="ticket-code">${escapeHtml(ticket.id)}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject)}</span></td><td>${priority(ticket.priority)}</td><td>${status(statusLabel, statusTone)}</td><td class="muted">${escapeHtml(ticket.updated)}</td><td>${renderCustomerTicketAction(ticket)}</td></tr>`;
+    return `<tr class="customer-ticket-row" tabindex="0" role="button" data-action="view-customer-ticket" data-ticket-id="${escapeHtml(ticket.id)}" aria-label="Open ${escapeHtml(ticket.id)}: ${escapeHtml(ticket.subject)}"><td><span class="ticket-code">${escapeHtml(ticket.id)}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject)}</span></td><td>${status(statusLabel, statusTone)}</td><td class="muted">${escapeHtml(ticket.updated)}</td><td>${renderCustomerTicketAction(ticket)}</td></tr>`;
   }).join("");
-  const emptyRow = `<tr><td colspan="6"><p class="table-empty">${activeOnly ? "No active tickets are available." : "No tickets or drafts are available."}</p></td></tr>`;
+  const emptyRow = `<tr><td colspan="5"><p class="table-empty">${activeOnly ? "No active tickets are available." : "No tickets or drafts are available."}</p></td></tr>`;
   const paginationMarkup = pagination ? renderTablePagination("paginate-customer-tickets", pagination, "tickets", "customerTicketsPage") : "";
-  return `<section class="panel table-panel"><div class="panel-head"><div><h2>${activeOnly ? "Active tickets" : "Tickets and drafts"}</h2><p>${activeOnly ? "The five most recently updated tickets in your account. Open any ticket to view its conversation." : "Private drafts are shown first. Select a ticket row to view its details and reply."}</p></div>${activeOnly ? '<button class="button text" data-page="tickets">View all tickets</button>' : ""}</div><table class="data-table"><thead><tr><th>Reference</th><th>Subject</th><th>Priority</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows || emptyRow}</tbody></table>${paginationMarkup}</section>`;
+  const panelClass = activeOnly ? "panel table-panel" : "panel table-panel customer-my-tickets-panel";
+  return `<section class="${panelClass}"><div class="panel-head"><div><h2>${activeOnly ? "Active tickets" : "Tickets and drafts"}</h2><p>${activeOnly ? "The five most recently updated tickets in your account. Open any ticket to view its conversation." : "Private drafts are shown first. Select a ticket row to view its details and reply."}</p></div>${activeOnly ? '<button class="button text" data-page="tickets">View all tickets</button>' : ""}</div><table class="data-table"><thead><tr><th>Reference</th><th>Subject</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows || emptyRow}</tbody></table>${paginationMarkup}</section>`;
 }
 
 function renderCustomerTicketDialog(ticketId) {
@@ -2167,7 +2273,7 @@ function renderCustomerTicketDialog(ticketId) {
     <div class="ticket-dialog-backdrop">
       <section class="ticket-dialog customer-ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="ticket-dialog-title">
         <header class="ticket-dialog-header"><div><span class="ticket-code">${ticketId}</span><h2 id="ticket-dialog-title">${ticket.subject}</h2></div><button class="dialog-close" type="button" data-action="close-customer-ticket" aria-label="Close ticket details">×</button></header>
-        <dl class="ticket-dialog-meta"><div><dt>Priority</dt><dd>${priority(ticket.priority)}</dd></div><div><dt>Status</dt><dd>${status(statusLabel, statusTone)}</dd></div><div><dt>Support queue</dt><dd>Assigned support team</dd></div><div><dt>Last updated</dt><dd>${escapeHtml(ticket.updatedDetail || ticket.updated || "—")}</dd></div></dl>
+        <dl class="ticket-dialog-meta"><div><dt>Status</dt><dd>${status(statusLabel, statusTone)}</dd></div><div><dt>Support team</dt><dd>Assigned support team</dd></div><div><dt>Last updated</dt><dd>${escapeHtml(ticket.updatedDetail || ticket.updated || "—")}</dd></div></dl>
         <div class="ticket-dialog-body"><h3>Conversation</h3><div class="conversation">${conversation}</div>${ticketAction}</div>
       </section>
     </div>`;
@@ -2210,7 +2316,7 @@ function renderStaffTicketDialog(ticketId) {
     </div>`;
 }
 
-function renderNewTicket() {
+function renderLegacyNewTicket() {
   const draft = state.activeDraftId ? getCustomerDrafts().find((item) => item.id === state.activeDraftId) : null;
   const isDraft = Boolean(draft);
   const draftSubject = draft?.subject ?? "";
@@ -2221,6 +2327,78 @@ function renderNewTicket() {
   return `
     <div class="page-heading"><div><span class="eyebrow">${isDraft ? "Continue draft" : "New customer request"}</span><h1>${isDraft ? "Finish your draft." : "Tell us what happened."}</h1><p>${isDraft ? "Your draft is still private until you submit it." : "We will send your request to the right support team after you submit it."}</p></div></div>
     <div class="form-shell"><form id="ticket-form" class="form-card" novalidate><div class="form-grid"><div class="form-field full"><label for="subject">Subject</label><input id="subject" name="subject" maxlength="160" value="${escapeHtml(draftSubject)}" placeholder="For example: I cannot sign in to my account" required /></div><div class="form-field full"><label for="description">Describe your issue</label><textarea id="description" name="description" placeholder="Include what you were trying to do, what happened, and any helpful details." required>${escapeHtml(draftBody)}</textarea></div><div class="form-field full"><label for="issue-choice">What best describes this?</label><select id="issue-choice" name="issue-choice" required><option value="" ${draft?.issueChoice ? "" : "selected"} disabled>Select one answer</option><option value="stopped_working" ${draft?.issueChoice === "stopped_working" ? "selected" : ""}>Something stopped working</option><option value="need_action" ${draft?.issueChoice === "need_action" ? "selected" : ""}>I need something done</option><option value="ongoing_issue" ${draft?.issueChoice === "ongoing_issue" ? "selected" : ""}>I have an ongoing issue</option><option value="change_request" ${draft?.issueChoice === "change_request" ? "selected" : ""}>I want to change something</option></select><p class="field-help">Your answer helps us route the request to the right support team. You do not need to know which team handles it.</p></div></div>${emptyDraftPrompt}<p id="ticket-form-error" class="form-error" role="alert" hidden></p><div class="notice"><span aria-hidden="true">↳</span><span><strong>Save or submit when ready.</strong> Drafts stay private. When submitted, your ticket receives a reference number and is sent for routing.</span></div><div class="form-actions"><button class="button signal" type="submit">Submit ticket</button><button class="button secondary" type="button" data-action="save-draft">${isDraft ? "Save changes" : "Save as draft"}</button><button class="button text" type="button" data-page="${isDraft ? "tickets" : "dashboard"}">Cancel</button></div></form></div>`;
+}
+
+function renderCustomerRequestProgress(step) {
+  const steps = [
+    ["Choose", "Pick the closest match"],
+    ["Describe", "Add the important details"],
+    ["Review", "Send when you are ready"],
+  ];
+  return `<ol class="customer-request-stepper" aria-label="New request progress">${steps.map(([label, detail], index) => {
+    const stepNumber = index + 1;
+    const stateClass = stepNumber === step ? " is-active" : stepNumber < step ? " is-complete" : "";
+    return `<li class="customer-request-step${stateClass}"><span class="customer-request-step-number">${stepNumber < step ? "&#10003;" : stepNumber}</span><span><strong>${label}</strong><small>${detail}</small></span></li>`;
+  }).join("")}</ol>`;
+}
+
+function renderCustomerRequestGuidance() {
+  return `
+    <aside class="customer-request-guidance" aria-label="Request tips">
+      <span class="eyebrow">A quick note</span>
+      <h2>Most requests take less than two minutes.</h2>
+      <p>We only ask for the details that will help the support team understand your situation.</p>
+      <ol>
+        <li><span>1</span><div><strong>Be specific</strong><p>Include an order number or date if it is relevant.</p></div></li>
+        <li><span>2</span><div><strong>Keep it safe</strong><p>Never send passwords, one-time codes, or full card numbers.</p></div></li>
+        <li><span>3</span><div><strong>Stay in the thread</strong><p>We will keep replies here, so nothing gets lost in your inbox.</p></div></li>
+      </ol>
+    </aside>`;
+}
+
+function renderNewTicket() {
+  const draft = state.activeDraftId ? getCustomerDrafts().find((item) => item.id === state.activeDraftId) : null;
+  const isDraft = Boolean(draft);
+  const values = currentCustomerRequestValues(draft);
+  const step = Math.min(3, Math.max(1, Number(state.customerRequestStep) || 1));
+  const issueTypes = [
+    { key: "stopped_working", title: "Something stopped working", description: "An order, account, payment, or feature is not working as expected.", icon: "&#9651;", tone: "issue" },
+    { key: "need_action", title: "I need something done", description: "You need help with an order, account, return, or another service request.", icon: "&#9634;", tone: "request" },
+    { key: "ongoing_issue", title: "I have an ongoing issue", description: "The same issue keeps happening and you need help getting it resolved.", icon: "&#8635;", tone: "ongoing" },
+    { key: "change_request", title: "I want to change something", description: "You want to update an order, delivery detail, account preference, or service.", icon: "&#8596;", tone: "change" },
+  ];
+  const selectedType = issueTypes.find((item) => item.key === values.issueChoice);
+  const emptyDraftPrompt = state.emptyDraftPrompt
+    ? `<div class="draft-empty-prompt" role="alertdialog" aria-labelledby="empty-draft-title" aria-describedby="empty-draft-description"><div><strong id="empty-draft-title">This ticket is empty.</strong><p id="empty-draft-description">There is nothing to save yet. Do you want to discard it?</p></div><div class="draft-empty-actions"><button class="button danger" type="button" data-action="discard-empty-draft">Discard ticket</button><button class="button secondary" type="button" data-action="keep-empty-draft">Keep editing</button></div></div>`
+    : "";
+  const hiddenTextFields = `<input type="hidden" name="subject" value="${escapeHtml(values.subject)}" /><input type="hidden" name="description" value="${escapeHtml(values.body)}" />`;
+  const hiddenTypeField = `<input type="hidden" name="issue-choice" value="${escapeHtml(values.issueChoice)}" />`;
+  const cancellationPage = isDraft ? "tickets" : "dashboard";
+  const selectionSummary = selectedType
+    ? `<div class="customer-request-selection"><span class="customer-request-type-icon ${selectedType.tone}" aria-hidden="true">${selectedType.icon}</span><div><span class="eyebrow">Your selected path</span><strong>${selectedType.title}</strong><p>${selectedType.description}</p></div><button class="button text" type="button" data-action="customer-request-previous-step">Change</button></div>`
+    : "";
+  const chooseStep = `
+    <div class="customer-request-copy"><h2>What best describes this?</h2><p>Choose the closest match. This helps us guide your request without making you learn support terminology.</p></div>
+    <div class="customer-request-type-grid">${issueTypes.map((item) => `<button class="customer-request-type${values.issueChoice === item.key ? " is-selected" : ""}" type="button" data-action="customer-request-select-type" data-issue-choice="${item.key}" aria-pressed="${values.issueChoice === item.key}"><span class="customer-request-type-icon ${item.tone}" aria-hidden="true">${item.icon}</span><span class="customer-request-type-copy"><strong>${item.title}</strong><small>${item.description}</small></span><span class="customer-request-type-check" aria-hidden="true">&#10003;</span></button>`).join("")}</div>
+    <div class="customer-request-actions"><button class="button text" type="button" data-page="${cancellationPage}">Cancel</button><button class="button signal customer-request-primary" type="button" data-action="customer-request-next-step">Continue <span aria-hidden="true">&#8594;</span></button></div>`;
+  const describeStep = `
+    ${selectionSummary}
+    <div class="customer-request-copy"><h2>Tell us the important details.</h2><p>A short, clear summary gives the support team a better place to start. You can always add more in the conversation later.</p></div>
+    <div class="customer-request-fields"><div class="form-field full"><label for="subject">Subject</label><input id="subject" name="subject" data-customer-request-field="subject" maxlength="160" value="${escapeHtml(values.subject)}" placeholder="For example: I cannot sign in to my account" required /></div><div class="form-field full"><label for="description">Describe your issue</label><textarea id="description" name="description" data-customer-request-field="body" maxlength="4000" placeholder="Include what you were trying to do, what happened, and any helpful details." required>${escapeHtml(values.body)}</textarea><p class="field-help">Include any order number, item, date, or error message that could help us understand the issue.</p></div></div>
+    <div class="customer-request-actions"><div><button class="button text" type="button" data-action="customer-request-previous-step">&#8592; Back</button><button class="button secondary" type="button" data-action="save-draft">${isDraft ? "Save changes" : "Save as draft"}</button></div><button class="button signal customer-request-primary" type="button" data-action="customer-request-next-step">Review request <span aria-hidden="true">&#8594;</span></button></div>`;
+  const reviewStep = `
+    ${selectionSummary}
+    <div class="customer-request-copy"><h2>Ready to send?</h2><p>Review the essentials below. Once you submit, your request will receive a reference number and be sent for routing.</p></div>
+    <dl class="customer-request-review"><div><dt>What you need</dt><dd>${escapeHtml(selectedType?.title || "Not selected")}</dd></div><div><dt>Subject</dt><dd>${escapeHtml(values.subject || "Not added")}</dd></div><div class="full"><dt>Description</dt><dd>${escapeHtml(values.body || "Not added")}</dd></div></dl>
+    <div class="notice customer-request-notice"><span aria-hidden="true">&#8594;</span><span><strong>Keep the conversation in one place.</strong> You can return to My tickets whenever you need to add information or check an update.</span></div>
+    <div class="customer-request-actions"><div><button class="button text" type="button" data-action="customer-request-previous-step">&#8592; Edit details</button><button class="button secondary" type="button" data-action="save-draft">${isDraft ? "Save changes" : "Save as draft"}</button></div><button class="button signal customer-request-primary" type="submit">Send request <span aria-hidden="true">&#8594;</span></button></div>`;
+  const currentStepMarkup = step === 1 ? chooseStep : step === 2 ? describeStep : reviewStep;
+  const retainedFields = step === 1 ? `${hiddenTextFields}${hiddenTypeField}` : step === 2 ? hiddenTypeField : `${hiddenTextFields}${hiddenTypeField}`;
+  return `
+    <div class="customer-request-page">
+      <div class="page-heading customer-request-heading"><div><span class="eyebrow">${isDraft ? "Continue draft" : "New customer request"}</span><h1>${isDraft ? "Finish your draft." : "Tell us what happened."}</h1><p>${isDraft ? "Your draft is still private until you submit it." : "We will send your request to the right support team after you submit it."}</p></div><aside class="customer-request-duration"><span aria-hidden="true">&#9719;</span><div><strong>Usually 1&ndash;2 minutes</strong><p>You are only three short steps away from sending your request.</p></div></aside></div>
+      <div class="customer-request-layout"><form id="ticket-form" class="customer-request-card" novalidate>${renderCustomerRequestProgress(step)}<div class="customer-request-body">${retainedFields}${currentStepMarkup}${emptyDraftPrompt}<p id="ticket-form-error" class="form-error" role="alert" ${state.customerRequestError ? "" : "hidden"}>${escapeHtml(state.customerRequestError)}</p></div></form>${renderCustomerRequestGuidance()}</div>
+    </div>`;
 }
 
 function renderStaffPerformance(staffName) {
@@ -2243,18 +2421,20 @@ function renderStaffPerformance(staffName) {
   }).join("");
   const qualityRows = period.quality.map((item) => `<div class="quality-row"><div><strong>${item.label}</strong><p>${item.detail}</p></div><span>${item.value}</span></div>`).join("");
   const resolvedRows = serverSessionIsActive() && serverPerformance
-    ? (serverPerformance.recent_resolved_work || []).map((ticket) => { const reference = ticket.reference || `TKT-${String(ticket.id).padStart(6, "0")}`; const closed = ticket.status === "CLOSED"; return `<tr><td><span class="ticket-code">${escapeHtml(reference)}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject || "Untitled ticket")}</span><span class="muted">${escapeHtml(ticket.customer || "Customer")} · ${escapeHtml(ticket.type || "")}</span></td><td>${priority(serverPriorityLabel(ticket.priority))}</td><td>${escapeHtml(serverStatusLabels[ticket.status] || ticket.status || "Resolved")}</td><td class="muted">${escapeHtml(formatServerDate(ticket.updated_at || ticket.created_at))}</td><td>${closed ? '<span class="muted">Read-only record</span>' : `<button class="button secondary" type="button" data-action="view-staff-ticket" data-ticket-id="${escapeHtml(reference)}">Open</button>`}</td></tr>`; }).join("")
+    ? (serverPerformance.recent_resolved_work || []).map((ticket) => { const reference = ticket.reference || `TKT-${String(ticket.id).padStart(6, "0")}`; const closed = ticket.status === "CLOSED"; const statusLabel = serverStatusLabels[ticket.status] || ticket.status || "Resolved"; return `<tr><td><span class="ticket-code">${escapeHtml(reference)}</span></td><td><span class="ticket-subject">${escapeHtml(ticket.subject || "Untitled ticket")}</span><span class="muted">${escapeHtml(ticket.customer || "Customer")} · ${escapeHtml(ticket.type || "")}</span></td><td>${priority(serverPriorityLabel(ticket.priority))}</td><td>${status(statusLabel, serverStatusTone(ticket.status))}</td><td class="muted">${escapeHtml(formatServerDate(ticket.updated_at || ticket.created_at))}</td><td><button class="button secondary staff-review-button" type="button" data-action="view-staff-ticket" data-ticket-id="${escapeHtml(reference)}">${closed ? "Review" : "Open"}</button></td></tr>`; }).join("")
     : "";
   const performanceTable = serverSessionIsActive() && serverPerformance
-    ? `<section class="panel table-panel staff-performance-work"><div class="panel-head"><div><h2>Recent resolved work</h2><p>Closed tickets are retained here for staff review after the customer review window.</p></div><span class="performance-total">${serverPerformance.total || 0} reviewable</span></div><table class="data-table"><thead><tr><th>Reference</th><th>Customer issue</th><th>Priority</th><th>Status</th><th>Resolved</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${resolvedRows || '<tr><td colspan="6"><p class="table-empty">No resolved tickets are available for review.</p></td></tr>'}</tbody></table><div class="table-pagination"><div class="table-pagination-status"><span>Page ${serverPerformance.page || 1} of ${Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5)))} · ${serverPerformance.total || 0} tickets</span><label class="table-page-jump">Go to page <input type="number" min="1" max="${Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5)))}" value="${serverPerformance.page || 1}" data-server-page-input="staff-performance-page" aria-label="Go to resolved work page" /></label></div><div><button class="button secondary" type="button" data-action="staff-performance-page" data-direction="previous" ${Number(serverPerformance.page || 1) <= 1 ? "disabled" : ""}>Previous</button><button class="button secondary" type="button" data-action="staff-performance-page" data-direction="next" ${Number(serverPerformance.page || 1) >= Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5))) ? "disabled" : ""}>Next</button></div></div></section>`
+    ? `<section class="panel table-panel staff-performance-work"><div class="panel-head"><div><h2>Recent resolved work</h2><p>Review resolved and closed tickets without reopening them or changing their history.</p></div><span class="performance-total">${serverPerformance.total || 0} reviewable</span></div><table class="data-table"><thead><tr><th>Reference</th><th>Customer issue</th><th>Priority</th><th>Status</th><th>Resolved</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${resolvedRows || '<tr><td colspan="6"><p class="table-empty">No resolved tickets are available for review.</p></td></tr>'}</tbody></table><div class="table-pagination"><div class="table-pagination-status"><span>Page ${serverPerformance.page || 1} of ${Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5)))} · ${serverPerformance.total || 0} tickets</span><label class="table-page-jump">Go to page <input type="number" min="1" max="${Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5)))}" value="${serverPerformance.page || 1}" data-server-page-input="staff-performance-page" aria-label="Go to resolved work page" /></label></div><div><button class="button secondary" type="button" data-action="staff-performance-page" data-direction="previous" ${Number(serverPerformance.page || 1) <= 1 ? "disabled" : ""}>Previous</button><button class="button secondary" type="button" data-action="staff-performance-page" data-direction="next" ${Number(serverPerformance.page || 1) >= Math.max(1, Math.ceil(Number(serverPerformance.total || 0) / Number(serverPerformance.page_size || 5))) ? "disabled" : ""}>Next</button></div></div></section>`
     : "";
   return `
+    <div class="staff-workspace staff-workspace--performance">
     <div class="page-heading performance-heading"><div><span class="eyebrow">${escapeHtml(staffName)}'s performance</span><h1>Your service results</h1><p>Track your resolved work, response speed, and service quality over time.</p></div><div class="performance-periods" role="group" aria-label="Select performance period">${periodControls}</div></div>
     <section class="metric-grid performance-metric-grid"><article class="metric-card"><span class="eyebrow">Tickets resolved</span><strong class="metric-value">${period.resolved}</strong><span class="metric-footer"><span class="trend">${period.resolvedNote.split(" ")[0]}</span> ${period.resolvedNote.replace(/^[^ ]+ /, "")}</span></article><article class="metric-card"><span class="eyebrow">Average first reply</span><strong class="metric-value">${period.firstReply}</strong><span class="metric-footer"><span class="trend">${period.firstReplyNote.split(" ").slice(0, 2).join(" ")}</span> ${period.firstReplyNote.split(" ").slice(2).join(" ")}</span></article><article class="metric-card"><span class="eyebrow">Average resolution</span><strong class="metric-value">${period.resolution}</strong><span class="metric-footer"><span class="trend">${period.resolutionNote.split(" ").slice(0, 2).join(" ")}</span> ${period.resolutionNote.split(" ").slice(2).join(" ")}</span></article><article class="metric-card"><span class="eyebrow">SLA met</span><strong class="metric-value">${period.sla}</strong><span class="metric-footer">${period.slaNote}</span></article></section>
     <section class="performance-detail-grid"><article class="panel performance-cadence-panel"><div class="panel-head"><div><h2>Resolution cadence</h2><p>Tickets resolved across ${period.label.toLowerCase()}.</p></div><span class="performance-total">${period.resolved} resolved</span></div><div class="panel-body"><div class="performance-cadence-chart">${cadence}</div><p class="performance-cadence-caption">Each column records resolved tickets in its time period.</p></div></article><article class="panel performance-quality-panel"><div class="panel-head"><div><h2>Quality review</h2><p>Personal service signals for ${period.label.toLowerCase()}.</p></div></div><div class="panel-body"><div class="quality-list">${qualityRows}</div><div class="performance-note"><span aria-hidden="true">✓</span><span><strong>Keep the momentum.</strong> Your reply speed remains inside the team target for this period.</span></div></div></article></section>
      ${performanceTable}
      <section class="performance-note"><span aria-hidden="true">↳</span><span><strong>Closed tickets remain reviewable here.</strong> They are removed from active worklists after the three-day customer review window.</span></section>
-    ${state.staffTicketDialog ? renderStaffTicketDialog(state.staffTicketDialog) : ""}`;
+    ${state.staffTicketDialog ? renderStaffTicketDialog(state.staffTicketDialog) : ""}
+    </div>`;
 }
 
 function renderStaff() {
@@ -2364,7 +2544,7 @@ function renderStaff() {
   const activeMyTicketsFilters = Number(state.myTicketsFilters.priority !== "all") + Number(state.myTicketsFilters.status !== "all") + Number(Boolean(state.myTicketsSearch));
   const myTicketsFilters = isMyTickets && state.myTicketsFiltersOpen ? `
     <div class="my-tickets-filters" role="group" aria-label="Filter ${staffName}'s assigned tickets">
-      <form id="staff-my-tickets-search-form" class="staff-my-tickets-search"><label for="staff-my-tickets-search">Search tickets</label><div class="staff-my-tickets-search-input"><input id="staff-my-tickets-search" name="staff-my-tickets-search" type="search" value="${escapeHtml(state.myTicketsSearch)}" placeholder="Ticket ID, subject, customer, queue, or status" /><button type="button" data-action="clear-staff-my-tickets-search" aria-label="Clear ticket search" ${state.myTicketsSearch ? "" : "disabled"}>×</button></div><button class="button secondary" type="submit">Search</button></form>
+      <form id="staff-my-tickets-search-form" class="staff-my-tickets-search"><div class="staff-my-tickets-search-field"><label for="staff-my-tickets-search">Search tickets</label><div class="staff-my-tickets-search-input"><input id="staff-my-tickets-search" name="staff-my-tickets-search" type="search" value="${escapeHtml(state.myTicketsSearch)}" placeholder="Ticket ID, subject, customer, queue, or status" /><button type="button" data-action="clear-staff-my-tickets-search" aria-label="Clear ticket search" ${state.myTicketsSearch ? "" : "disabled"}>×</button></div></div><button class="button secondary" type="submit">Search</button></form>
       <label><span>Priority</span><select data-my-tickets-filter="priority" aria-label="Filter by priority"><option value="all" ${state.myTicketsFilters.priority === "all" ? "selected" : ""}>All priorities</option><option value="High" ${state.myTicketsFilters.priority === "High" ? "selected" : ""}>High priority</option><option value="Medium" ${state.myTicketsFilters.priority === "Medium" ? "selected" : ""}>Medium priority</option><option value="Low" ${state.myTicketsFilters.priority === "Low" ? "selected" : ""}>Low priority</option></select></label>
       <label><span>Status</span><select data-my-tickets-filter="status" aria-label="Filter by status"><option value="all" ${state.myTicketsFilters.status === "all" ? "selected" : ""}>All statuses</option><option value="Waiting for Support" ${state.myTicketsFilters.status === "Waiting for Support" ? "selected" : ""}>Waiting for Support</option><option value="Waiting for Customer" ${state.myTicketsFilters.status === "Waiting for Customer" ? "selected" : ""}>Waiting for Customer</option><option value="Reopened" ${state.myTicketsFilters.status === "Reopened" ? "selected" : ""}>Reopened</option><option value="Resolved" ${state.myTicketsFilters.status === "Resolved" ? "selected" : ""}>Resolved</option></select></label>
       <button class="button text" type="button" data-action="clear-my-tickets-filters">Clear filters</button>
@@ -2381,16 +2561,20 @@ function renderStaff() {
   const table = `<section class="panel table-panel"><div class="panel-head"><div><h2>${tableTitle}</h2><p>${tableSubtitle}</p></div>${tableAction}</div>${tableFilters}<table class="data-table"><thead><tr>${tableHeaders}</tr></thead><tbody>${tableRows}</tbody></table>${tablePagination}</section>`;
   const queueBanner = `<section class="queue-banner"><div><span class="eyebrow">Your queue</span><h2>${escapeHtml(queueName)}</h2><p>Tickets routed to the support area assigned to you.</p></div><div class="queue-count">QUEUE BACKLOG<strong>${serverQueue.backlog ?? 18}</strong></div><div class="queue-count">UNASSIGNED<strong>${serverQueue.unassigned ?? availableTicketPoolTickets.length}</strong></div><div class="queue-count">HIGH PRIORITY<strong>${serverQueue.high_priority ?? availableTicketPoolTickets.filter((ticket) => ticket.priority === "High").length}</strong></div></section>`;
   const deskMetrics = `<section class="metric-grid"><article class="metric-card"><span class="eyebrow">My active tickets</span><strong class="metric-value">${serverMetrics.active_tickets ?? assignedTickets.length}</strong><span class="metric-footer"><span class="trend warn">${serverMetrics.waiting_for_reply ?? getStaffPendingReplyCount()}</span> ticket waiting your reply</span></article><article class="metric-card"><span class="eyebrow">Pending closure</span><strong class="metric-value">${serverMetrics.pending_closure ?? 2}</strong><span class="metric-footer">Ready for your final review</span></article><article class="metric-card resolution-metric"><div class="metric-card-header"><span class="eyebrow">Tickets resolved</span><button class="metric-swap" type="button" data-action="cycle-staff-resolved-period" aria-label="Show the next resolved-ticket period" title="Show today, this week, or this month">↻</button></div><strong class="metric-value">${resolvedPeriod.value}</strong><span class="metric-footer"><span class="period-label">${resolvedPeriod.label}</span>${resolvedPeriod.detail}</span></article><article class="metric-card"><span class="eyebrow">Route corrections</span><strong class="metric-value">${serverMetrics.route_corrections ?? 2}</strong><span class="metric-footer"><span class="period-label">This week</span> Recorded for model review</span></article></section>`;
-  if (isTicketPool) return `<section class="ticket-pool-page">${queueBanner}${table}</section>`;
+  if (isTicketPool) return `<div class="staff-workspace staff-workspace--pool"><section class="ticket-pool-page">${queueBanner}${table}</section></div>`;
   if (isMyTickets) return `
+    <div class="staff-workspace staff-workspace--tickets">
     <div class="page-heading staff-worklist-heading"><div><span class="eyebrow">${staffName}'s workspace</span><h1>My tickets</h1><p>Review the tickets assigned to ${staffName}, reply where needed, and keep each customer informed.</p></div></div>
     ${table}
-    ${state.staffTicketDialog ? renderStaffTicketDialog(state.staffTicketDialog) : ""}`;
+    ${state.staffTicketDialog ? renderStaffTicketDialog(state.staffTicketDialog) : ""}
+    </div>`;
   return `
+    <div class="staff-workspace staff-workspace--desk">
     <div class="page-heading"><div><span class="eyebrow">Technical Support</span><h1>My desk</h1><p>Focus on your assigned tickets, requested replies, and closure work.</p></div></div>
     ${queueBanner}
     ${deskMetrics}
-    ${table}`;
+    ${table}
+    </div>`;
 }
 
 function getAdminTicket(ticketId) {
@@ -3174,6 +3358,8 @@ document.addEventListener("click", (event) => {
     if (state.page === "unassigned") state.staffTicketPoolPage = 1;
     if (state.page === "new-ticket") {
       state.activeDraftId = null;
+      state.customerFormRequestKey = createCustomerRequestKey();
+      resetCustomerRequest();
       state.emptyDraftPrompt = false;
     }
     if (state.page !== "tickets") {
@@ -3230,7 +3416,45 @@ document.addEventListener("click", (event) => {
     showToast("Password recovery will be provided by the Django account service.");
     return;
   }
-  if (action === "new-ticket") { state.activeDraftId = null; state.customerFormRequestKey = createCustomerRequestKey(); state.emptyDraftPrompt = false; state.page = "new-ticket"; render(); return; }
+  if (action === "new-ticket") { state.activeDraftId = null; state.customerFormRequestKey = createCustomerRequestKey(); resetCustomerRequest(); state.emptyDraftPrompt = false; state.page = "new-ticket"; render(); return; }
+  if (action === "customer-request-select-type") {
+    syncCustomerRequestValues(event.target.closest("#ticket-form"));
+    state.customerRequestValues = { ...currentCustomerRequestValues(), issueChoice: event.target.closest("[data-issue-choice]").dataset.issueChoice };
+    state.customerRequestError = "";
+    state.emptyDraftPrompt = false;
+    render();
+    window.ticketMotion?.animateCustomerChoice(main);
+    return;
+  }
+  if (action === "customer-request-next-step") {
+    const values = syncCustomerRequestValues(event.target.closest("#ticket-form"));
+    if (state.customerRequestStep === 1) {
+      if (!values.issueChoice) {
+        showCustomerRequestError("Choose the option that best describes your request before continuing.");
+        return;
+      }
+      state.customerRequestStep = 2;
+    } else if (state.customerRequestStep === 2) {
+      if (!values.subject || !values.body) {
+        const fieldId = !values.subject ? "subject" : "description";
+        showCustomerRequestError("Add both a subject and a description before reviewing your request.", fieldId);
+        return;
+      }
+      state.customerRequestStep = 3;
+    }
+    state.customerRequestError = "";
+    state.emptyDraftPrompt = false;
+    render();
+    return;
+  }
+  if (action === "customer-request-previous-step") {
+    syncCustomerRequestValues(event.target.closest("#ticket-form"));
+    state.customerRequestStep = Math.max(1, state.customerRequestStep - 1);
+    state.customerRequestError = "";
+    state.emptyDraftPrompt = false;
+    render();
+    return;
+  }
   if (action === "view-customer-ticket") {
     openCustomerTicket(event.target.closest("[data-ticket-id]").dataset.ticketId);
     return;
@@ -3426,7 +3650,7 @@ document.addEventListener("click", (event) => {
   if (action === "save-draft") {
     const form = event.target.closest("#ticket-form");
     if (!form) return;
-    const values = getTicketFormValues(form);
+    const values = syncCustomerRequestValues(form);
     if (!values.subject && !values.body && !values.issueChoice) {
       state.emptyDraftPrompt = true;
       render();
@@ -3663,6 +3887,16 @@ document.addEventListener("keydown", (event) => {
   event.preventDefault();
   if (row.dataset.action === "view-customer-ticket") openCustomerTicket(row.dataset.ticketId);
   if (row.dataset.action === "continue-draft") continueCustomerDraft(row.dataset.draftId);
+});
+
+document.addEventListener("input", (event) => {
+  const requestField = event.target.closest("#ticket-form [data-customer-request-field]");
+  if (!requestField) return;
+  state.customerRequestValues = {
+    ...currentCustomerRequestValues(),
+    [requestField.dataset.customerRequestField]: requestField.value,
+  };
+  if (state.customerRequestError) state.customerRequestError = "";
 });
 
 document.addEventListener("input", (event) => {
@@ -3977,19 +4211,18 @@ document.addEventListener("submit", (event) => {
   }
   if (form.id === "ticket-form") {
     event.preventDefault();
+    syncCustomerRequestValues(form);
     const formData = new FormData(form);
     const subject = String(formData.get("subject") || "").trim();
     const description = String(formData.get("description") || "").trim();
     const issueChoice = String(formData.get("issue-choice") || "");
-    const error = form.querySelector("#ticket-form-error");
-    const firstMissingField = !subject ? form.elements.subject : !description ? form.elements.description : !issueChoice ? form.elements["issue-choice"] : null;
-    if (firstMissingField) {
-      error.textContent = "Enter a subject, describe the issue, and select what best describes it before submitting.";
-      error.hidden = false;
-      firstMissingField.focus();
+    if (!subject || !description || !issueChoice) {
+      state.customerRequestStep = !issueChoice ? 1 : 2;
+      const fieldId = !issueChoice ? "" : !subject ? "subject" : "description";
+      showCustomerRequestError("Enter a subject, describe the issue, and select what best describes it before submitting.", fieldId);
       return;
     }
-    error.hidden = true;
+    state.customerRequestError = "";
     if (serverSessionIsActive()) {
       void submitServerCustomerTicket(form);
       return;
@@ -4000,6 +4233,7 @@ document.addEventListener("submit", (event) => {
     if (submittedDraftId) state.discardedDraftIds.add(submittedDraftId);
     state.activeDraftId = null;
     state.customerFormRequestKey = "";
+    resetCustomerRequest();
     showToast(submittedDraftId ? "Draft submitted. The routing result will appear in your ticket timeline." : "Ticket submitted. The routing result will appear in your ticket timeline.");
     state.page = "tickets";
     window.setTimeout(() => {
