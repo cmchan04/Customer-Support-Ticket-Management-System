@@ -384,6 +384,7 @@ const staffPerformancePeriods = [
 const main = document.querySelector("#main-content");
 const navigation = document.querySelector("#primary-navigation");
 const breadcrumb = document.querySelector("#breadcrumb");
+const systemDateLine = document.querySelector("#system-date");
 const toast = document.querySelector("#toast");
 const accountMenu = document.querySelector("#account-menu");
 const accountMenuTrigger = document.querySelector("#account-menu-trigger");
@@ -392,6 +393,15 @@ const appShell = document.querySelector(".app-shell");
 let toastTimer;
 let lastRenderPageKey = "";
 let lastRenderDialogKey = "";
+
+function getSystemDateLabel(date = new Date()) {
+  return new Intl.DateTimeFormat("en-MY", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
 
 function getPrototypeRoleForEmail(email) {
   const knownRoles = {
@@ -1336,6 +1346,7 @@ function render(options = {}) {
   const dialogChanged = dialogKey !== lastRenderDialogKey;
   renderNavigation();
   updateAccountIdentity();
+  if (systemDateLine) systemDateLine.textContent = getSystemDateLabel();
   const isCustomer = state.role === "customer";
   const isStaff = state.role === "staff";
   breadcrumb.hidden = isCustomer;
@@ -4280,6 +4291,11 @@ else {
   render();
   showLoginScreen();
 }
+
+// Keep the shell date accurate if the workspace remains open across midnight.
+window.setInterval(() => {
+  if (systemDateLine) systemDateLine.textContent = getSystemDateLabel();
+}, 60_000);
 
 window.setInterval(() => {
   if (!serverSessionIsActive() || state.serverLoading) return;

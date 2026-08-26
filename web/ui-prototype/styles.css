@@ -140,7 +140,6 @@ button { cursor: pointer; }
 .account-menu-divider { display: block; height: 1px; margin: 5px 0; background: rgba(220, 238, 240, 0.15); }
 .account-menu-danger { color: #ffae92; }
 .account-menu-danger:hover { color: #fff1ec; background: rgba(226, 105, 63, 0.2); }
-.prototype-note { margin: 19px 3px 0; color: #657c88; font-family: Consolas, monospace; font-size: 9px; letter-spacing: 0.08em; }
 
 .workspace { min-width: 0; min-height: 100vh; margin-left: var(--sidebar-width); }
 .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 102px; padding: 22px 46px 20px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.84); }
