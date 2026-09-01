@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Profile · Solve Your Inquiries{% endblock %}
+{% block content %}
+<section class="panel">
+  <p class="muted">ACCOUNT</p>
+  <h1>Edit profile</h1>
+  <p>Email is fixed for this account. Use the JSON endpoint <code>POST /profile/</code> to update the name or phone.</p>
+  <dl><dt>Email</dt><dd>{{ request.user.email }}</dd><dt>Role</dt><dd>{{ request.user.get_role_display }}</dd></dl>
+</section>
+{% endblock %}

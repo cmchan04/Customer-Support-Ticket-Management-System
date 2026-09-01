@@ -1,0 +1,513 @@
+{
+  "config": {
+    "artifact_dir": "E:\\APU\\FYP_TP068983\\artifacts\\models",
+    "cache_dir": "E:\\APU\\FYP_TP068983\\artifacts\\cache",
+    "cv_folds": 5,
+    "dataset_path": "E:\\APU\\FYP_TP068983\\resources\\data\\aa_dataset-tickets-multi-lang-5-2-50-version.csv",
+    "decision_tree_max_depth": [
+      10,
+      20
+    ],
+    "decision_tree_min_samples_leaf": [
+      1,
+      3
+    ],
+    "joint_c": [
+      10.0
+    ],
+    "joint_class_weight_powers": [
+      1.0,
+      1.25
+    ],
+    "joint_max_features": 300000,
+    "joint_ngram_ranges": [
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        4
+      ]
+    ],
+    "joint_score_temperatures": [
+      0.1,
+      0.25
+    ],
+    "joint_type_weights": [
+      3
+    ],
+    "logistic_c": [
+      1.0,
+      3.0,
+      10.0
+    ],
+    "max_dfs": [
+      1.0
+    ],
+    "min_dfs": [
+      1
+    ],
+    "minimum_accuracy": 0.9,
+    "n_jobs": 4,
+    "nb_alpha": [
+      0.1,
+      1.0
+    ],
+    "ngram_ranges": [
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ]
+    ],
+    "random_seed": 29,
+    "report_dir": "E:\\APU\\FYP_TP068983\\resources\\model_output",
+    "svm_c": [
+      1.0,
+      3.0,
+      10.0
+    ],
+    "svm_probability_calibration": true,
+    "svm_probability_calibration_cv_folds": 3,
+    "svm_probability_calibration_method": "sigmoid",
+    "test_size": 0.2,
+    "type_onehot_weights": [
+      0.25,
+      0.5,
+      1.0,
+      2.0
+    ],
+    "type_router_c": [
+      10.0,
+      30.0
+    ],
+    "type_router_calibrate_queue": true,
+    "type_router_calibration_cv_folds": 3,
+    "type_router_calibration_grid": [
+      -1.5,
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      1.5
+    ],
+    "type_router_calibration_passes": 3,
+    "type_router_class_weight_powers": [
+      0.5,
+      1.0
+    ],
+    "type_router_max_features": 300000,
+    "type_router_ngram_ranges": [
+      [
+        1,
+        3
+      ]
+    ],
+    "type_router_weights": [
+      1,
+      3
+    ],
+    "type_svm_c": [
+      1.0,
+      3.0,
+      10.0
+    ],
+    "type_svm_ngram_ranges": [
+      [
+        1,
+        3
+      ]
+    ],
+    "type_svm_weights": [
+      1,
+      2,
+      3
+    ],
+    "xgboost_max_depth": [
+      6
+    ],
+    "xgboost_n_estimators": [
+      100
+    ]
+  },
+  "dataset": {
+    "duplicates_removed": 0,
+    "english_rows": 16338,
+    "invalid_rows_removed": 0,
+    "path": "E:\\APU\\FYP_TP068983\\resources\\data\\aa_dataset-tickets-multi-lang-5-2-50-version.csv",
+    "prepared_rows": 16338,
+    "priority_classes": 3,
+    "queue_classes": 10,
+    "sha256": "f187c090e59581c2bbf3aa1377c8db4dd647464ecf2ae51bf8966e42e0ed6bc0",
+    "source_rows": 28587,
+    "type_classes": 4
+  },
+  "labels": {
+    "priority": [
+      "high",
+      "low",
+      "medium"
+    ],
+    "queue": [
+      "Billing and Payments",
+      "Customer Service",
+      "General Inquiry",
+      "Human Resources",
+      "IT Support",
+      "Product Support",
+      "Returns and Exchanges",
+      "Sales and Pre-Sales",
+      "Service Outages and Maintenance",
+      "Technical Support"
+    ]
+  },
+  "library_versions": {
+    "joblib": "1.5.3",
+    "matplotlib": "3.10.8",
+    "nltk": "3.9.4",
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "pytest": "9.1.1",
+    "python": "3.12.5",
+    "ruff": "0.16.3",
+    "scikit-learn": "1.8.0",
+    "scipy": "1.17.1",
+    "seaborn": "0.13.2",
+    "xgboost": "3.4.0"
+  },
+  "results": {
+    "artifact_dir": "E:\\APU\\FYP_TP068983\\artifacts\\models",
+    "dataset_summary": {
+      "duplicates_removed": 0,
+      "english_rows": 16338,
+      "invalid_rows_removed": 0,
+      "prepared_rows": 16338,
+      "priority_classes": 3,
+      "queue_classes": 10,
+      "source_rows": 28587,
+      "type_classes": 4
+    },
+    "priority": {
+      "best_params": {
+        "base_estimator__classifier__C": 30.0,
+        "base_estimator__text__type_weight": 1,
+        "base_estimator__tfidf__max_df": 1.0,
+        "base_estimator__tfidf__min_df": 1,
+        "base_estimator__tfidf__ngram_range": [
+          1,
+          3
+        ],
+        "class_weight_power": 1.0
+      },
+      "candidate_results": [
+        {
+          "best_params": {
+            "classifier__C": 10.0,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.725095638867636,
+          "cv_macro_f1": 0.7162308030544713,
+          "holdout_accuracy": 0.7362301101591188,
+          "holdout_macro_f1": 0.7302942633084953,
+          "model": "logistic_regression"
+        },
+        {
+          "best_params": {
+            "classifier__alpha": 0.1,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.6979342004590665,
+          "cv_macro_f1": 0.6738831859836444,
+          "holdout_accuracy": 0.7194002447980417,
+          "holdout_macro_f1": 0.7059551358411168,
+          "model": "multinomial_naive_bayes"
+        },
+        {
+          "best_params": {
+            "classifier__C": 10.0,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.7426166794185157,
+          "cv_macro_f1": 0.7343373461013253,
+          "holdout_accuracy": 0.7545899632802937,
+          "holdout_macro_f1": 0.7500262398029269,
+          "model": "linear_svm"
+        },
+        {
+          "best_params": {
+            "classifier__C": 10.0,
+            "text__type_weight": 1,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.7450650344299923,
+          "cv_macro_f1": 0.7368098669877903,
+          "holdout_accuracy": 0.7591799265605875,
+          "holdout_macro_f1": 0.7526999757381517,
+          "model": "linear_svm_with_type"
+        },
+        {
+          "best_params": {
+            "base_estimator__classifier__C": 30.0,
+            "base_estimator__text__type_weight": 1,
+            "base_estimator__tfidf__max_df": 1.0,
+            "base_estimator__tfidf__min_df": 1,
+            "base_estimator__tfidf__ngram_range": [
+              1,
+              3
+            ],
+            "class_weight_power": 1.0
+          },
+          "cv_accuracy": 0.7599846977811783,
+          "cv_macro_f1": 0.7536354723057251,
+          "holdout_accuracy": 0.7858017135862914,
+          "holdout_macro_f1": 0.78191087181247,
+          "model": "linear_svm_by_type"
+        },
+        {
+          "best_params": {
+            "classifier__max_depth": 20,
+            "classifier__min_samples_leaf": 1,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.4143075745983168,
+          "cv_macro_f1": 0.38490256689571595,
+          "holdout_accuracy": 0.4724602203182375,
+          "holdout_macro_f1": 0.400650804978423,
+          "model": "decision_tree"
+        },
+        {
+          "best_params": {
+            "classifier__max_depth": 6,
+            "classifier__n_estimators": 100,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              2
+            ]
+          },
+          "cv_accuracy": 0.5338944146901301,
+          "cv_macro_f1": 0.5279256013683387,
+          "holdout_accuracy": 0.5370257037943696,
+          "holdout_macro_f1": 0.5326706401805453,
+          "model": "xgboost"
+        }
+      ],
+      "confidence_method": "sigmoid_calibrated_probability",
+      "cv_macro_f1": 0.7536354723057251,
+      "holdout_metrics": {
+        "accuracy": 0.7858017135862914,
+        "high_priority_recall": 0.8102362204724409,
+        "macro_f1": 0.78191087181247,
+        "macro_precision": 0.7876862242472912,
+        "macro_recall": 0.7771581458753127,
+        "weighted_f1": 0.7856154905448186,
+        "weighted_precision": 0.7861480967912758,
+        "weighted_recall": 0.7858017135862914
+      },
+      "misclassified_count": 700,
+      "selected_model": "linear_svm_by_type"
+    },
+    "quality_gate": {
+      "minimum_accuracy": 0.9,
+      "passed": false,
+      "targets": {
+        "priority": {
+          "accuracy": 0.7858017135862914,
+          "passed": false
+        },
+        "queue": {
+          "accuracy": 0.7695838433292533,
+          "passed": false
+        }
+      }
+    },
+    "queue": {
+      "best_params": {
+        "base_estimator__classifier__C": 30.0,
+        "base_estimator__text__type_weight": 1,
+        "base_estimator__tfidf__max_df": 1.0,
+        "base_estimator__tfidf__min_df": 1,
+        "base_estimator__tfidf__ngram_range": [
+          1,
+          3
+        ],
+        "class_weight_power": 0.5
+      },
+      "candidate_results": [
+        {
+          "best_params": {
+            "classifier__C": 10.0,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.6689364957918899,
+          "cv_macro_f1": 0.6782920768379863,
+          "holdout_accuracy": 0.70593635250918,
+          "holdout_macro_f1": 0.7260390118407432,
+          "model": "logistic_regression"
+        },
+        {
+          "best_params": {
+            "classifier__alpha": 0.1,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.5699311400153023,
+          "cv_macro_f1": 0.4467269715035812,
+          "holdout_accuracy": 0.5966952264381885,
+          "holdout_macro_f1": 0.49711948302751907,
+          "model": "multinomial_naive_bayes"
+        },
+        {
+          "best_params": {
+            "classifier__C": 10.0,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.702601377199694,
+          "cv_macro_f1": 0.7090282517148614,
+          "holdout_accuracy": 0.74265605875153,
+          "holdout_macro_f1": 0.7516715346295715,
+          "model": "linear_svm"
+        },
+        {
+          "best_params": {
+            "classifier__C": 10.0,
+            "text__type_weight": 3,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              3
+            ]
+          },
+          "cv_accuracy": 0.7070390206579954,
+          "cv_macro_f1": 0.7127934554850052,
+          "holdout_accuracy": 0.7451040391676866,
+          "holdout_macro_f1": 0.7571043694842496,
+          "model": "linear_svm_with_type"
+        },
+        {
+          "best_params": {
+            "base_estimator__classifier__C": 30.0,
+            "base_estimator__text__type_weight": 1,
+            "base_estimator__tfidf__max_df": 1.0,
+            "base_estimator__tfidf__min_df": 1,
+            "base_estimator__tfidf__ngram_range": [
+              1,
+              3
+            ],
+            "class_weight_power": 0.5
+          },
+          "cv_accuracy": 0.7267788829380261,
+          "cv_macro_f1": 0.7296497617941333,
+          "holdout_accuracy": 0.7662178702570379,
+          "holdout_macro_f1": 0.7780478968449145,
+          "model": "linear_svm_by_type"
+        },
+        {
+          "best_params": {
+            "classifier__max_depth": 20,
+            "classifier__min_samples_leaf": 1,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              2
+            ]
+          },
+          "cv_accuracy": 0.31032899770466715,
+          "cv_macro_f1": 0.3022995674694248,
+          "holdout_accuracy": 0.34761321909424725,
+          "holdout_macro_f1": 0.31131304593978043,
+          "model": "decision_tree"
+        },
+        {
+          "best_params": {
+            "classifier__max_depth": 6,
+            "classifier__n_estimators": 100,
+            "tfidf__max_df": 1.0,
+            "tfidf__min_df": 1,
+            "tfidf__ngram_range": [
+              1,
+              2
+            ]
+          },
+          "cv_accuracy": 0.460902830910482,
+          "cv_macro_f1": 0.4430564690991525,
+          "holdout_accuracy": 0.47674418604651164,
+          "holdout_macro_f1": 0.4660274431200424,
+          "model": "xgboost"
+        }
+      ],
+      "confidence_method": "sigmoid_calibrated_probability",
+      "cv_macro_f1": 0.7296497617941333,
+      "holdout_metrics": {
+        "accuracy": 0.7695838433292533,
+        "macro_f1": 0.7890181485739719,
+        "macro_precision": 0.8657493119079067,
+        "macro_recall": 0.7371212120491364,
+        "weighted_f1": 0.7706725220499653,
+        "weighted_precision": 0.7848648134497584,
+        "weighted_recall": 0.7695838433292533
+      },
+      "misclassified_count": 753,
+      "selected_model": "linear_svm_by_type"
+    },
+    "report_dir": "E:\\APU\\FYP_TP068983\\resources\\model_output"
+  },
+  "split": {
+    "random_seed": 29,
+    "test_rows": 3268,
+    "test_size": 0.2,
+    "train_rows": 13070
+  },
+  "trained_at_utc": "2026-08-21T11:04:14.347212+00:00"
+}

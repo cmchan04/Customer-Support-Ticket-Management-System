@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Desktop UI prototype for the customer support ticket system." />
+    <title>Solve Your Inquiries — Customer Support</title>
+    <!-- DJANGO:BASE -->
+  <link rel="stylesheet" href="styles.css?v=20260823-calm-guided-home-v3" />
+  </head>
+  <body>
+    <section id="login-screen" class="login-screen" aria-labelledby="login-title">
+      <div class="login-frame">
+        <section class="login-intro" aria-label="About Solve Your Inquiries">
+          <a class="login-brand" href="#" aria-label="Solve Your Inquiries home">
+            <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span><strong>Solve Your Inquiries</strong><small>customer support</small></span>
+          </a>
+          <div class="login-intro-copy">
+            <span class="eyebrow">Support, clearly organised</span>
+            <h1>Tell us what happened.<br />We’ll keep it moving.</h1>
+            <p>Log and follow every support request in one place, from the first message through to resolution.</p>
+          </div>
+          <ol class="login-route" aria-label="How the support service works">
+            <li><span>01</span><div><strong>Describe the issue</strong><p>Give the support team the details they need.</p></div></li>
+            <li><span>02</span><div><strong>Find the right support team</strong><p>Your request is routed for the appropriate review.</p></div></li>
+            <li><span>03</span><div><strong>Track the next step</strong><p>Follow updates and reply from your ticket timeline.</p></div></li>
+          </ol>
+          <p class="login-intro-foot">A desktop support workspace for customers and service teams.</p>
+        </section>
+        <main class="login-card">
+          <div class="login-card-head"><span class="eyebrow">Secure access</span><h2 id="login-title">Sign in to your support workspace</h2><p>Use the email address registered to your account.</p></div>
+          <form id="public-login-form" class="login-form">
+            <label for="login-email">Email address<input id="login-email" name="login-email" type="email" autocomplete="email" placeholder="name@organisation.com" required /></label>
+            <div class="login-password-label"><label for="login-password">Password</label><button class="login-text-action" type="button" data-action="forgot-password">Forgot password?</button></div>
+            <input id="login-password" name="login-password" type="password" autocomplete="current-password" placeholder="Enter your password" required />
+            <label class="login-remember"><input type="checkbox" name="remember-session" /> <span>Keep me signed in on this device</span></label>
+            <button class="button signal login-submit" type="submit">Sign in</button>
+          </form>
+          <div class="login-help"><strong>Need an account or cannot sign in?</strong><p>Contact your organisation’s support administrator for account access.</p></div>
+          <p class="login-security-note"><span aria-hidden="true">⌁</span> Your support tickets and conversations are protected by role-based access.</p>
+        </main>
+      </div>
+    </section>
+
+    <div class="app-shell" hidden>
+      <aside class="sidebar" aria-label="Primary navigation">
+        <a class="brand" href="#" data-action="go-dashboard" aria-label="Return to workspace home">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>
+            <strong>Solve Your Inquiries</strong>
+            <small>customer support</small>
+          </span>
+        </a>
+
+        <section class="role-picker" aria-label="Prototype role selector">
+          <span class="eyebrow">Viewing as</span>
+          <div class="role-buttons" role="group" aria-label="Select a prototype role">
+            <button class="role-button" type="button" data-role="customer">Customer</button>
+            <button class="role-button" type="button" data-role="staff">Staff</button>
+            <button class="role-button active" type="button" data-role="admin">Admin</button>
+          </div>
+        </section>
+
+        <nav id="primary-navigation" class="primary-navigation"></nav>
+
+        <div class="sidebar-foot">
+          <div id="account-menu-shell" class="account-menu-shell">
+          <button id="account-menu-trigger" class="user-chip" type="button" data-action="toggle-account-menu" aria-expanded="false" aria-controls="account-menu">
+            <span class="avatar avatar-admin">AT</span>
+            <span>
+              <strong id="user-name">Aisha Tan</strong>
+              <small id="user-role">System administrator</small>
+            </span>
+            <span class="account-menu-caret" aria-hidden="true">•••</span>
+          </button>
+          <div id="account-menu" class="account-popover" role="menu" aria-label="Account menu" hidden>
+            <div class="account-popover-profile"><span>Signed in as</span><strong id="account-menu-name">Aisha Tan</strong><small id="account-menu-role">System administrator</small></div>
+            <div class="account-popover-actions">
+              <button class="account-menu-item" type="button" role="menuitem" data-action="edit-profile">Edit profile</button>
+              <button class="account-menu-item" type="button" role="menuitem" data-action="change-password">Change password</button>
+              <span class="account-menu-divider" aria-hidden="true"></span>
+              <button class="account-menu-item account-menu-danger" type="button" role="menuitem" data-action="log-out">Log out</button>
+            </div>
+          </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p id="breadcrumb" class="breadcrumb">Administrator / Overview</p>
+            <p id="system-date" class="date-line" aria-label="Current date"></p>
+          </div>
+          <div class="routing-rail" aria-label="Ticket workflow">
+            <span class="rail-step complete">01 <b>Intake</b></span>
+            <span class="rail-line"></span>
+            <span class="rail-step complete">02 <b>Route</b></span>
+            <span class="rail-line"></span>
+            <span class="rail-step current">03 <b>Work</b></span>
+            <span class="rail-line"></span>
+            <span class="rail-step">04 <b>Resolve</b></span>
+          </div>
+        </header>
+
+        <main id="main-content" class="main-content" tabindex="-1"></main>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <!-- DJANGO:SESSION -->
+    <script src="vendor/gsap.min.js"></script>
+    <script src="motion.js?v=20260823-customer-motion-v5"></script>
+    <!-- Bump this version when the UI bundle changes so browsers do not keep
+         an older customer table layout from cache during local testing. -->
+    <script src="app.js?v=20260823-guided-request-v5"></script>
+  </body>
+</html>
