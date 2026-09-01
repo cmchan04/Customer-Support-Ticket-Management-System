@@ -15,9 +15,6 @@ class TrainingConfig:
     artifact_dir: Path
     report_dir: Path
     cache_dir: Path
-    # Optional label remapping used by isolated experiments. Production
-    # training leaves this empty; experiments can merge labels without
-    # changing the source CSV or deployed artifacts.
     queue_label_map: tuple[tuple[str, str], ...] = ()
     random_seed: int = 42
     test_size: float = 0.20

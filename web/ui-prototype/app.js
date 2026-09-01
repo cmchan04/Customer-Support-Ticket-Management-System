@@ -28,7 +28,7 @@ const roleDefinitions = {
       ["01", "Overview", "dashboard"],
       ["02", "Ticket management", "tickets", "42"],
       ["03", "Model centre", "models"],
-      ["04", "Queues & staff", "users"],
+      ["04", "Queues & support agents", "users"],
       ["—", "Records"],
       ["05", "Activity & audit log", "activity"],
     ],
@@ -203,10 +203,10 @@ const accountProfiles = {
 
 const adminActivityEvents = [
   { tone: "signal", category: "Routing", title: "Three tickets need manual routing", detail: "Classification failed before a queue could be assigned.", actor: "Routing service", time: "11:42 TODAY" },
-  { tone: "gold", category: "Routing", title: "Staff corrected a queue prediction", detail: "TKT-000115 moved from Customer Service to Billing and Payments.", actor: "Arun Patel", time: "10:26 TODAY" },
+  { tone: "gold", category: "Routing", title: "Support agent corrected a queue prediction", detail: "TKT-000115 moved from Customer Service to Billing and Payments.", actor: "Arun Patel", time: "10:26 TODAY" },
   { tone: "", category: "Model", title: "Separate model dashboard updated", detail: "Seven reviewed tickets were added to its live accuracy sample.", actor: "Aisha Tan", time: "09:03 TODAY" },
   { tone: "", category: "Ticket", title: "Customer reopened a resolved ticket", detail: "TKT-000121 was returned to the Billing and Payments queue.", actor: "Maya Lim", time: "YESTERDAY, 16:18" },
-  { tone: "gold", category: "Access", title: "Staff queue membership changed", detail: "Priya Nair was added to Product Support.", actor: "Aisha Tan", time: "YESTERDAY, 14:05" },
+  { tone: "gold", category: "Access", title: "Support agent queue membership changed", detail: "Priya Nair was added to Product Support.", actor: "Aisha Tan", time: "YESTERDAY, 14:05" },
 ];
 
 const auditLogRecords = [
@@ -218,7 +218,7 @@ const auditLogRecords = [
   { timestamp: "18 Aug 2026, 14:05", actor: "Aisha Tan", category: "Access", action: "Changed queue membership", record: "Priya Nair", detail: "Added to Product Support." },
   { timestamp: "18 Aug 2026, 13:26", actor: "Aisha Tan", category: "Model", action: "Selected active model", record: "Joint model", detail: "Set as the routing model for new submissions." },
   { timestamp: "17 Aug 2026, 17:14", actor: "Customer system", category: "Ticket", action: "Marked ticket resolved", record: "TKT-000104", detail: "Started the three-day customer review period." },
-  { timestamp: "17 Aug 2026, 11:52", actor: "Aisha Tan", category: "Access", action: "Created staff account", record: "Priya Nair", detail: "Assigned the Product Support staff role." },
+  { timestamp: "17 Aug 2026, 11:52", actor: "Aisha Tan", category: "Access", action: "Created support agent account", record: "Priya Nair", detail: "Assigned the Product Support queue." },
   { timestamp: "16 Aug 2026, 09:31", actor: "Routing service", category: "Routing", action: "Predicted ticket queue", record: "TKT-000128", detail: "Assigned Technical Support with high confidence." },
 ];
 
@@ -1117,7 +1117,7 @@ function getFilteredStaffMyTickets() {
 
 function getAssignedStaffName(staffId) {
   const profile = Object.values(accountProfiles).find((item) => item.id === staffId);
-  return profile ? getProfileDisplayName(profile) : "Assigned staff";
+  return profile ? getProfileDisplayName(profile) : "Assigned support agent";
 }
 
 function getStaffTicket(ticketId) {
@@ -1160,8 +1160,8 @@ function rerouteStaffTicketToAdmin(ticketId) {
   else adminTickets.unshift(routingRecord);
   state.staffReroutedTicketIds.add(ticket.id);
   state.claimedTicketAssignments.delete(ticket.id);
-  adminActivityEvents.unshift({ tone: "signal", category: "Routing", title: "Staff sent a ticket for manual rerouting", detail: `${ticket.id} was returned by ${staffName} because it does not belong to the current queue.`, actor: staffName, time: "JUST NOW" });
-  auditLogRecords.unshift({ timestamp: "19 Aug 2026, 12:04", actor: staffName, category: "Routing", action: "Sent ticket for manual rerouting", record: ticket.id, detail: "Staff determined that the ticket does not belong to their assigned queue." });
+  adminActivityEvents.unshift({ tone: "signal", category: "Routing", title: "Support agent sent a ticket for manual rerouting", detail: `${ticket.id} was returned by ${staffName} because it does not belong to the current queue.`, actor: staffName, time: "JUST NOW" });
+  auditLogRecords.unshift({ timestamp: "19 Aug 2026, 12:04", actor: staffName, category: "Routing", action: "Sent ticket for manual rerouting", record: ticket.id, detail: "Support agent determined that the ticket does not belong to their assigned queue." });
   closeActiveDialog("staffTicketDialog", () => showToast(`${ticket.id} was sent to Admin Ticket management for manual rerouting.`));
 }
 
@@ -1386,13 +1386,13 @@ function renderEditProfile() {
   const definition = roleDefinitions[state.role];
   return `
     <div class="page-heading"><div><span class="eyebrow">Account settings</span><h1>Edit profile</h1><p>Keep your details current so the support team can contact you about your requests.</p></div></div>
-    <div class="account-form-shell"><form id="profile-form" class="form-card account-form-card"><section class="account-identity-strip"><span class="account-profile-avatar avatar-${state.role}">${getProfileInitials(profile)}</span><div><span class="eyebrow">Your account</span><strong>${escapeHtml(getProfileDisplayName(profile))}</strong><p>${definition.title}</p></div></section><div class="form-grid"><div class="form-field"><label for="profile-first-name">First name</label><input id="profile-first-name" name="profile-first-name" autocomplete="given-name" maxlength="40" value="${escapeHtml(profile.firstName)}" required /></div><div class="form-field"><label for="profile-last-name">Last name</label><input id="profile-last-name" name="profile-last-name" autocomplete="family-name" maxlength="40" value="${escapeHtml(profile.lastName)}" required /></div><div class="form-field full"><label for="profile-email">Email address</label><input id="profile-email" name="profile-email" type="email" autocomplete="email" maxlength="120" value="${escapeHtml(profile.email)}" readonly aria-readonly="true" required /></div><div class="form-field full"><label for="profile-phone">Phone number <span>Optional</span></label><input id="profile-phone" name="profile-phone" type="tel" autocomplete="tel" maxlength="30" value="${escapeHtml(profile.phone)}" placeholder="For example: +60 12-345 6789" /></div></div><div class="notice"><span aria-hidden="true">↳</span><span><strong>These details are visible only to you and authorised support staff.</strong> They help us identify your account and contact you about an active request.</span></div><div class="form-actions"><button class="button signal" type="submit">Save changes</button><button class="button secondary" type="button" data-action="return-from-account">Cancel</button></div></form></div>`;
+    <div class="account-form-shell"><form id="profile-form" class="form-card account-form-card"><section class="account-identity-strip"><span class="account-profile-avatar avatar-${state.role}">${getProfileInitials(profile)}</span><div><span class="eyebrow">Your account</span><strong>${escapeHtml(getProfileDisplayName(profile))}</strong><p>${definition.title}</p></div></section><div class="form-grid"><div class="form-field"><label for="profile-first-name">First name</label><input id="profile-first-name" name="profile-first-name" autocomplete="given-name" maxlength="40" value="${escapeHtml(profile.firstName)}" required /></div><div class="form-field"><label for="profile-last-name">Last name</label><input id="profile-last-name" name="profile-last-name" autocomplete="family-name" maxlength="40" value="${escapeHtml(profile.lastName)}" required /></div><div class="form-field full"><label for="profile-email">Email address</label><input id="profile-email" name="profile-email" type="email" autocomplete="email" maxlength="120" value="${escapeHtml(profile.email)}" readonly aria-readonly="true" required /></div><div class="form-field full"><label for="profile-phone">Phone number <span>Optional</span></label><input id="profile-phone" name="profile-phone" type="tel" autocomplete="tel" maxlength="30" value="${escapeHtml(profile.phone)}" placeholder="For example: +60 12-345 6789" /></div></div><div class="notice"><span aria-hidden="true">↳</span><span><strong>These details are visible only to you and authorised support agents.</strong> They help us identify your account and contact you about an active request.</span></div><div class="form-actions"><button class="button signal" type="submit">Save changes</button><button class="button secondary" type="button" data-action="return-from-account">Cancel</button></div></form></div>`;
 }
 
 function renderChangePassword() {
   return `
     <div class="page-heading"><div><span class="eyebrow">Account settings</span><h1>Change password</h1><p>Use a new password that you do not use for another service.</p></div></div>
-    <div class="account-form-shell"><form id="password-form" class="form-card account-form-card"><section class="security-strip"><span class="eyebrow">Secure your account</span><strong>Choose a strong, private password.</strong><p>Your password needs at least 8 characters, one uppercase letter, one number, and one special character.</p></section><div class="form-grid"><div class="form-field full"><label for="current-password">Current password</label><input id="current-password" name="current-password" type="password" autocomplete="current-password" required /></div><div class="form-field"><label for="new-password">New password</label><input id="new-password" name="new-password" type="password" autocomplete="new-password" minlength="8" aria-describedby="password-requirements password-form-error" required /></div><div class="form-field"><label for="confirm-password">Confirm new password</label><input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" minlength="8" required /></div></div><ul id="password-requirements" class="password-requirements" aria-label="Password requirements"><li data-rule="length">At least 8 characters</li><li data-rule="uppercase">One uppercase letter</li><li data-rule="number">One number</li><li data-rule="special">One special character</li></ul><p id="password-form-error" class="form-error" role="alert" hidden></p><div class="notice"><span aria-hidden="true">↳</span><span><strong>Keep your password private.</strong> Support staff will never ask you to disclose it in a ticket reply.</span></div><div class="form-actions"><button class="button signal" type="submit">Save new password</button><button class="button secondary" type="button" data-action="return-from-account">Cancel</button></div></form></div>`;
+    <div class="account-form-shell"><form id="password-form" class="form-card account-form-card"><section class="security-strip"><span class="eyebrow">Secure your account</span><strong>Choose a strong, private password.</strong><p>Your password needs at least 8 characters, one uppercase letter, one number, and one special character.</p></section><div class="form-grid"><div class="form-field full"><label for="current-password">Current password</label><input id="current-password" name="current-password" type="password" autocomplete="current-password" required /></div><div class="form-field"><label for="new-password">New password</label><input id="new-password" name="new-password" type="password" autocomplete="new-password" minlength="8" aria-describedby="password-requirements password-form-error" required /></div><div class="form-field"><label for="confirm-password">Confirm new password</label><input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" minlength="8" required /></div></div><ul id="password-requirements" class="password-requirements" aria-label="Password requirements"><li data-rule="length">At least 8 characters</li><li data-rule="uppercase">One uppercase letter</li><li data-rule="number">One number</li><li data-rule="special">One special character</li></ul><p id="password-form-error" class="form-error" role="alert" hidden></p><div class="notice"><span aria-hidden="true">↳</span><span><strong>Keep your password private.</strong> Support agents will never ask you to disclose it in a ticket reply.</span></div><div class="form-actions"><button class="button signal" type="submit">Save new password</button><button class="button secondary" type="button" data-action="return-from-account">Cancel</button></div></form></div>`;
 }
 
 function status(label, tone) { return `<span class="status ${tone}">${label}</span>`; }
@@ -1924,7 +1924,7 @@ async function saveServerStaffUser(form) {
     body.password = String(formData.get("staff-password") || "");
   }
   if (!queueId || !body.first_name || !body.last_name || (userId === "new" && (!body.email || !body.password))) {
-    showToast("Complete the staff name, queue, email, and password before saving.");
+    showToast("Complete the support agent name, queue, email, and password before saving.");
     return true;
   }
   const key = `staff-user:${userId}`;
@@ -1936,9 +1936,9 @@ async function saveServerStaffUser(form) {
     state.staffUserDialog = null;
     await refreshServerData({ renderAfter: false });
     render();
-    showToast(userId === "new" ? "Staff member created." : "Staff record updated.");
+    showToast(userId === "new" ? "Support agent created." : "Support agent record updated.");
   } catch (error) {
-    showToast(error.message || "Unable to save the staff record.");
+    showToast(error.message || "Unable to save the support agent record.");
   } finally {
     finishPendingAction(key, scope);
   }
@@ -1956,9 +1956,9 @@ async function deactivateServerStaffUser(userId) {
     state.staffDeleteConfirmId = null;
     await refreshServerData({ renderAfter: false });
     render();
-    showToast("Staff member deactivated.");
+    showToast("Support agent deactivated.");
   } catch (error) {
-    showToast(error.message || "Unable to deactivate the staff member.");
+    showToast(error.message || "Unable to deactivate the support agent.");
   } finally {
     finishPendingAction(key, scope);
   }
@@ -2867,7 +2867,7 @@ function renderAdminModelMetadata(ticket) {
 function renderAdminPreviousPrediction(ticket) {
   if (!ticket.reroutedByStaff || !ticket.originalPrediction) return "";
   const { queue, priority: originalPriority } = ticket.originalPrediction;
-  return `<div class="admin-previous-prediction"><dt>Previous model prediction</dt><dd><span><small>Queue</small><strong>${escapeHtml(queue || "—")}</strong></span><span><small>Priority</small><strong>${escapeHtml(originalPriority || "—")}</strong></span><em>Staff requested manual rerouting.</em></dd></div>`;
+  return `<div class="admin-previous-prediction"><dt>Previous model prediction</dt><dd><span><small>Queue</small><strong>${escapeHtml(queue || "—")}</strong></span><span><small>Priority</small><strong>${escapeHtml(originalPriority || "—")}</strong></span><em>Support agent requested manual rerouting.</em></dd></div>`;
 }
 
 function renderAdminConversation(ticket) {
@@ -2877,7 +2877,7 @@ function renderAdminConversation(ticket) {
   }
   const conversation = staffTicketConversations[ticket.id] || {};
   const customerMessage = conversation.customerMessage || ticket.request;
-  const staffMessage = conversation.staffMessage || "No staff response has been recorded for this ticket yet.";
+  const staffMessage = conversation.staffMessage || "No support agent response has been recorded for this ticket yet.";
   const staffName = ticket.assignee === "Unassigned" ? "Support team" : ticket.assignee;
   return `<section class="admin-ticket-conversation"><div class="admin-conversation-heading"><h3>Conversation</h3><span>Read only</span></div><div class="conversation"><article class="conversation-message customer-message"><span>${escapeHtml(ticket.customer)}</span><p>${escapeHtml(customerMessage)}</p></article><article class="conversation-message staff-message"><span>${escapeHtml(staffName)}</span><p>${escapeHtml(staffMessage)}</p></article></div></section>`;
 }
@@ -2896,9 +2896,9 @@ function renderAdminTicketDialog(ticketId) {
   const managementForm = isClosed ? "" : `<form id="admin-ticket-management-form" class="admin-ticket-actions" data-ticket-id="${ticket.id}"><div class="form-grid"><div class="form-field"><label for="admin-ticket-queue">Route to</label><select id="admin-ticket-queue" name="admin-ticket-queue" required>${routeSelection}</select></div><div class="form-field"><label for="admin-ticket-assignee">Assign to</label><select id="admin-ticket-assignee" name="admin-ticket-assignee" required>${assigneeOptions}</select></div><div class="form-field"><label for="admin-ticket-priority">Priority</label><select id="admin-ticket-priority" name="admin-ticket-priority" required>${ticket.priority ? priorityOptions : `<option value="" selected disabled>Select priority</option>${priorityOptions}`}</select></div></div><div class="form-actions"><button class="button signal" type="submit">Save ticket changes</button><button class="button secondary" type="button" data-action="close-admin-ticket">Cancel</button></div></form>`;
   const forceCloseControl = isClosed
     ? `<section class="admin-closed-state"><strong>${ticket.forceClosed ? "Force closed by administrator" : "Ticket closed automatically"}</strong><p>${ticket.forceClosed ? `Reason: ${escapeHtml(ticket.forceCloseReason || "Not recorded")}` : escapeHtml(ticket.closureReason || "Customer did not reopen the resolved ticket within 3 days.")}</p></section>`
-    : `<form id="admin-force-close-form" class="admin-force-close" data-ticket-id="${ticket.id}"><div class="admin-force-close-copy"><span class="eyebrow">Administrative action</span><strong>Force close ticket</strong><p>Use only when no further support action is required. The customer and staff cannot reopen it.</p></div><div class="form-field"><label for="admin-force-close-reason">Closure reason</label><textarea id="admin-force-close-reason" name="admin-force-close-reason" maxlength="500" required placeholder="Explain why this ticket must be closed."></textarea></div><div class="form-actions"><button class="button admin-force-close-button" type="submit">Force close ticket</button></div></form>`;
+    : `<form id="admin-force-close-form" class="admin-force-close" data-ticket-id="${ticket.id}"><div class="admin-force-close-copy"><span class="eyebrow">Administrative action</span><strong>Force close ticket</strong><p>Use only when no further support action is required. The customer and support agents cannot reopen it.</p></div><div class="form-field"><label for="admin-force-close-reason">Closure reason</label><textarea id="admin-force-close-reason" name="admin-force-close-reason" maxlength="500" required placeholder="Explain why this ticket must be closed."></textarea></div><div class="form-actions"><button class="button admin-force-close-button" type="submit">Force close ticket</button></div></form>`;
   return `
-    <div class="ticket-dialog-backdrop" role="presentation"><section class="ticket-dialog admin-ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-ticket-dialog-title"><header class="ticket-dialog-header"><div><span class="ticket-code">${ticket.id}</span><h2 id="admin-ticket-dialog-title">${escapeHtml(ticket.subject)}</h2></div><button class="dialog-close" type="button" data-action="close-admin-ticket" aria-label="Close ticket details">×</button></header><dl class="ticket-dialog-meta"><div><dt>Customer</dt><dd>${escapeHtml(ticket.customer)}</dd></div><div><dt>Ticket type</dt><dd>${escapeHtml(ticket.type)}</dd></div><div><dt>Model used</dt><dd class="admin-model-used">${renderAdminModelMetadata(ticket)}</dd></div>${renderAdminPreviousPrediction(ticket)}<div><dt>Priority</dt><dd>${ticket.priority ? priority(ticket.priority) : "—"}</dd></div><div><dt>Status</dt><dd>${renderAdminTicketStatus(ticket)}</dd></div><div><dt>Current assignee</dt><dd>${escapeHtml(ticket.assignee)}</dd></div></dl><div class="ticket-dialog-body"><section class="admin-ticket-request"><h3>Customer request</h3><p>${escapeHtml(ticket.request)}</p></section>${renderAdminConversation(ticket)}<div class="admin-ticket-note"><span aria-hidden="true">↳</span><span><strong>Customer communication is staff-only.</strong> Administrators can review the conversation, adjust the route, priority, and assignee, force close a ticket with a recorded reason, but cannot reply to the customer.</span></div>${forceCloseControl}${managementForm}</div></section></div>`;
+    <div class="ticket-dialog-backdrop" role="presentation"><section class="ticket-dialog admin-ticket-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-ticket-dialog-title"><header class="ticket-dialog-header"><div><span class="ticket-code">${ticket.id}</span><h2 id="admin-ticket-dialog-title">${escapeHtml(ticket.subject)}</h2></div><button class="dialog-close" type="button" data-action="close-admin-ticket" aria-label="Close ticket details">×</button></header><dl class="ticket-dialog-meta"><div><dt>Customer</dt><dd>${escapeHtml(ticket.customer)}</dd></div><div><dt>Ticket type</dt><dd>${escapeHtml(ticket.type)}</dd></div><div><dt>Model used</dt><dd class="admin-model-used">${renderAdminModelMetadata(ticket)}</dd></div>${renderAdminPreviousPrediction(ticket)}<div><dt>Priority</dt><dd>${ticket.priority ? priority(ticket.priority) : "—"}</dd></div><div><dt>Status</dt><dd>${renderAdminTicketStatus(ticket)}</dd></div><div><dt>Current assignee</dt><dd>${escapeHtml(ticket.assignee)}</dd></div></dl><div class="ticket-dialog-body"><section class="admin-ticket-request"><h3>Customer request</h3><p>${escapeHtml(ticket.request)}</p></section>${renderAdminConversation(ticket)}<div class="admin-ticket-note"><span aria-hidden="true">↳</span><span><strong>Customer communication is handled by support agents.</strong> Administrators can review the conversation, adjust the route, priority, and assignee, force close a ticket with a recorded reason, but cannot reply to the customer.</span></div>${forceCloseControl}${managementForm}</div></section></div>`;
 }
 
 function renderAdminTicketManagement() {
@@ -2943,8 +2943,8 @@ function renderAdminTicketManagement() {
   const attentionHeaders = `${attentionReference}<th>Customer request</th>${renderAdminSortHeader("model", "Model")}${renderAdminSortHeader("queue", "Queue")}${renderAdminSortHeader("priority", "Priority")}${renderAdminSortHeader("status", "Status")}${renderAdminSortHeader("attention", "Attention reason")}<th><span class="sr-only">Actions</span></th>`;
   const allHeaders = `${attentionReference}<th>Customer request</th>${renderAdminSortHeader("model", "Model")}${renderAdminSortHeader("queue", "Queue")}${renderAdminSortHeader("priority", "Priority")}${renderAdminSortHeader("status", "Status")}${renderAdminSortHeader("assignee", "Assignee")}${renderAdminSortHeader("updated", "Updated")}<th><span class="sr-only">Actions</span></th>`;
   return `
-    <div class="page-heading"><div><span class="eyebrow">Administration</span><h1>Ticket management</h1><p>Review ticket details, correct routing, and assign ownership. Customer replies remain with support staff.</p></div></div>
-    <section class="admin-ticket-management-note"><span aria-hidden="true">↳</span><span><strong>Admin controls affect ownership and routing only.</strong> Use the ticket dialog to reroute or reassign a ticket; staff handle every customer response.</span></section>
+    <div class="page-heading"><div><span class="eyebrow">Administration</span><h1>Ticket management</h1><p>Review ticket details, correct routing, and assign ownership. Customer replies remain with support agents.</p></div></div>
+    <section class="admin-ticket-management-note"><span aria-hidden="true">↳</span><span><strong>Admin controls affect ownership and routing only.</strong> Use the ticket dialog to reroute or reassign a ticket; support agents handle every customer response.</span></section>
     <section class="panel admin-ticket-controls">${adminSearch}</section>
     <section class="panel table-panel admin-ticket-table admin-management-attention"><div class="panel-head"><div><h2>Requires attention</h2><p>Routing failures and tickets that have passed their service deadline.</p></div><span class="performance-total">${attentionTickets.length} of ${attentionSourceCount} tickets</span></div><div class="admin-ticket-table-wrap"><table class="data-table"><thead><tr>${attentionHeaders}</tr></thead><tbody>${attentionRows}</tbody></table></div>${renderTablePagination("paginate-admin-attention", attentionPagination, "tickets", "adminAttentionPage")}</section>
     <section class="panel table-panel admin-ticket-table admin-ticket-directory"><div class="panel-head"><div><h2>All tickets</h2><p>Every ticket in the service desk, including reopened and high-priority work.</p></div><span class="performance-total">${filteredTickets.length} of ${allSourceCount} tickets</span></div><div class="admin-ticket-table-wrap"><table class="data-table"><thead><tr>${allHeaders}</tr></thead><tbody>${allRows}</tbody></table></div>${renderTablePagination("paginate-admin-all-tickets", allPagination, "tickets", "adminAllTicketsPage")}</section>
@@ -3162,14 +3162,14 @@ function renderStaffUserDialog(userId) {
     : staffQueueOptions;
   const queueOptions = [`<option value="">Select a queue</option>`, ...queueNames.map((queue) => `<option value="${escapeHtml(queue)}" ${user.queue === queue ? "selected" : ""}>${escapeHtml(queue)}</option>`)].join("");
   const deleteControl = !isNew ? (state.staffDeleteConfirmId === user.id
-    ? `<div class="staff-delete-confirm"><strong>Deactivate ${escapeHtml(getProfileDisplayName(user))}?</strong><span>This prevents sign-in and removes the account from active queue assignment.</span><div><button class="button danger" type="button" data-action="confirm-delete-staff-user" data-staff-id="${user.id}">Deactivate staff member</button><button class="button secondary" type="button" data-action="cancel-staff-delete">Cancel</button></div></div>`
-    : `<button class="button danger staff-delete-button" type="button" data-action="delete-staff-user" data-staff-id="${user.id}">Deactivate staff member</button>`) : "";
+    ? `<div class="staff-delete-confirm"><strong>Deactivate ${escapeHtml(getProfileDisplayName(user))}?</strong><span>This prevents sign-in and removes the account from active queue assignment.</span><div><button class="button danger" type="button" data-action="confirm-delete-staff-user" data-staff-id="${user.id}">Deactivate support agent</button><button class="button secondary" type="button" data-action="cancel-staff-delete">Cancel</button></div></div>`
+    : `<button class="button danger staff-delete-button" type="button" data-action="delete-staff-user" data-staff-id="${user.id}">Deactivate support agent</button>`) : "";
   const summaryPanel = isNew
-    ? `<aside class="staff-user-summary staff-user-summary-empty"><span class="eyebrow">Resolved work</span><h3>Performance appears after ticket activity</h3><p>Once this staff member resolves tickets, their Today, Week, and Month summaries will be available here.</p></aside>`
-    : `<aside class="staff-user-summary"><div class="staff-summary-head"><div><span class="eyebrow">Resolved work</span><h3>${escapeHtml(getProfileDisplayName(user))}</h3><p>Completed tickets for the selected period.</p></div><div class="metric-period-switcher staff-summary-periods" role="group" aria-label="Select staff resolved work period">${periodControls}</div></div><div class="staff-summary-metrics"><article><span class="eyebrow">Tickets resolved</span><strong>${summary.count}</strong><small>${state.staffUserResolvedPeriod === "today" ? "Today" : state.staffUserResolvedPeriod === "week" ? "This week" : "This month"}</small></article><section class="staff-sla-section"><div class="staff-overall-sla"><div><span class="eyebrow">Overall SLA met</span><strong>${summary.sla}</strong><small>Resolved within SLA</small></div><span class="staff-sla-caption">By priority</span></div><div class="staff-priority-sla-grid"><article class="high"><span>High</span><strong>${prioritySla.high}</strong></article><article class="medium"><span>Medium</span><strong>${prioritySla.medium}</strong></article><article class="low"><span>Low</span><strong>${prioritySla.low}</strong></article></div></section><article><span class="eyebrow">Average resolution</span><strong>${summary.time}</strong><small>Time to resolve</small></article></div><div class="staff-summary-activity"><span class="staff-status ${staffStatusClass(user.status)}"><i></i>${escapeHtml(user.status)}</span><span>${user.activeTickets} active ticket${user.activeTickets === 1 ? "" : "s"} · ${user.waitingReply} awaiting reply</span></div></aside>`;
+    ? `<aside class="staff-user-summary staff-user-summary-empty"><span class="eyebrow">Resolved work</span><h3>Performance appears after ticket activity</h3><p>Once this support agent resolves tickets, their Today, Week, and Month summaries will be available here.</p></aside>`
+    : `<aside class="staff-user-summary"><div class="staff-summary-head"><div><span class="eyebrow">Resolved work</span><h3>${escapeHtml(getProfileDisplayName(user))}</h3><p>Completed tickets for the selected period.</p></div><div class="metric-period-switcher staff-summary-periods" role="group" aria-label="Select support agent resolved work period">${periodControls}</div></div><div class="staff-summary-metrics"><article><span class="eyebrow">Tickets resolved</span><strong>${summary.count}</strong><small>${state.staffUserResolvedPeriod === "today" ? "Today" : state.staffUserResolvedPeriod === "week" ? "This week" : "This month"}</small></article><section class="staff-sla-section"><div class="staff-overall-sla"><div><span class="eyebrow">Overall SLA met</span><strong>${summary.sla}</strong><small>Resolved within SLA</small></div><span class="staff-sla-caption">By priority</span></div><div class="staff-priority-sla-grid"><article class="high"><span>High</span><strong>${prioritySla.high}</strong></article><article class="medium"><span>Medium</span><strong>${prioritySla.medium}</strong></article><article class="low"><span>Low</span><strong>${prioritySla.low}</strong></article></div></section><article><span class="eyebrow">Average resolution</span><strong>${summary.time}</strong><small>Time to resolve</small></article></div><div class="staff-summary-activity"><span class="staff-status ${staffStatusClass(user.status)}"><i></i>${escapeHtml(user.status)}</span><span>${user.activeTickets} active ticket${user.activeTickets === 1 ? "" : "s"} · ${user.waitingReply} awaiting reply</span></div></aside>`;
   const emailField = `<label>Work email<input name="staff-email" type="email" required value="${escapeHtml(user.email)}" ${isNew ? "" : "readonly"} /></label>`;
   const passwordField = isNew && serverSessionIsActive() ? `<label>Temporary password<input name="staff-password" type="password" minlength="8" required placeholder="Set an initial sign-in password" /></label>` : "";
-  return `<div class="ticket-dialog-backdrop" data-action="close-staff-user" role="presentation"><section class="ticket-dialog staff-user-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-user-dialog-title"><header class="ticket-dialog-header staff-user-dialog-header"><div class="staff-dialog-person"><span class="staff-avatar large">${isNew ? "+" : escapeHtml(getProfileInitials(user))}</span><div><span class="eyebrow">${isNew ? "New staff member" : "Staff member"}</span><h2 id="staff-user-dialog-title">${isNew ? "Add staff member" : escapeHtml(getProfileDisplayName(user))}</h2><p>${isNew ? "Create an account and assign its first support queue." : `${escapeHtml(user.title)} · ${escapeHtml(user.queue)}`}</p></div></div><button class="dialog-close" type="button" data-action="close-staff-user" aria-label="Close staff details">×</button></header><div class="staff-user-dialog-body"><form id="staff-user-form" data-staff-id="${user.id}" class="staff-user-form"><div class="form-section-heading"><span class="eyebrow">Account and assignment</span><h3>${isNew ? "Staff details" : "Update staff details"}</h3><p>Update the staff profile and assign the queue where this member can work.</p></div><div class="profile-name-grid"><label>First name<input name="staff-first-name" required value="${escapeHtml(user.firstName)}" /></label><label>Last name<input name="staff-last-name" required value="${escapeHtml(user.lastName)}" /></label></div>${emailField}${passwordField}<label>Phone number<input name="staff-phone" type="tel" value="${escapeHtml(user.phone)}" /></label><label>Role title<input name="staff-title" required value="${escapeHtml(user.title)}" /></label><label>Assigned queue<select name="staff-queue" required>${queueOptions}</select></label><div class="form-actions"><button class="button signal" type="submit">${isNew ? "Create staff member" : "Save staff changes"}</button><button class="button secondary close-staff-user-button" type="button" data-action="close-staff-user">Cancel</button></div>${deleteControl}</form>${summaryPanel}</div></section></div>`;
+  return `<div class="ticket-dialog-backdrop" data-action="close-staff-user" role="presentation"><section class="ticket-dialog staff-user-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-user-dialog-title"><header class="ticket-dialog-header staff-user-dialog-header"><div class="staff-dialog-person"><span class="staff-avatar large">${isNew ? "+" : escapeHtml(getProfileInitials(user))}</span><div><span class="eyebrow">${isNew ? "New support agent" : "Support agent"}</span><h2 id="staff-user-dialog-title">${isNew ? "Add support agent" : escapeHtml(getProfileDisplayName(user))}</h2><p>${isNew ? "Create an account and assign its first support queue." : `${escapeHtml(user.title)} · ${escapeHtml(user.queue)}`}</p></div></div><button class="dialog-close" type="button" data-action="close-staff-user" aria-label="Close support agent details">×</button></header><div class="staff-user-dialog-body"><form id="staff-user-form" data-staff-id="${user.id}" class="staff-user-form"><div class="form-section-heading"><span class="eyebrow">Account and assignment</span><h3>${isNew ? "Support agent details" : "Update support agent details"}</h3><p>Update the support agent profile and assign the queue where this member can work.</p></div><div class="profile-name-grid"><label>First name<input name="staff-first-name" required value="${escapeHtml(user.firstName)}" /></label><label>Last name<input name="staff-last-name" required value="${escapeHtml(user.lastName)}" /></label></div>${emailField}${passwordField}<label>Phone number<input name="staff-phone" type="tel" value="${escapeHtml(user.phone)}" /></label><label>Role title<input name="staff-title" required value="${escapeHtml(user.title)}" /></label><label>Assigned queue<select name="staff-queue" required>${queueOptions}</select></label><div class="form-actions"><button class="button signal" type="submit">${isNew ? "Create support agent" : "Save support agent changes"}</button><button class="button secondary close-staff-user-button" type="button" data-action="close-staff-user">Cancel</button></div>${deleteControl}</form>${summaryPanel}</div></section></div>`;
 }
 
 function renderQueueDashboard() {
@@ -3188,9 +3188,9 @@ function renderQueueDashboard() {
   const trendArea = `18,90 ${trendPoints} 228,90`;
   const staffCount = selected.staffCount ?? staffUsers.length;
   const selectionDescription = state.staffQueueFilter === "all"
-    ? "A consolidated view of every support queue and the staff directory."
-    : `Business operations and assigned staff for ${selectedQueueLabel}.`;
-  return `<section class="queue-dashboard" aria-labelledby="queue-dashboard-title"><div class="queue-dashboard-head"><div><span class="eyebrow">Queue operations</span><h2 id="queue-dashboard-title">${escapeHtml(selectedQueueLabel)}</h2><p>${escapeHtml(selectionDescription)}</p></div><div class="queue-dashboard-controls"><label class="queue-dashboard-filter" for="queue-dashboard-filter"><span>Dashboard queue</span><select id="queue-dashboard-filter" aria-label="Dashboard queue" data-staff-queue-filter>${queueOptions}</select></label><div class="queue-period-control"><span>Reporting period</span><div class="metric-period-switcher" role="group" aria-label="Select queue dashboard reporting period">${periodControls}</div></div></div></div><section class="queue-kpi-grid" aria-label="Selected queue operational metrics"><article><span class="eyebrow">Tickets received</span><strong>${selected.ticketsReceived}</strong><small>${period.label}</small></article><article><span class="eyebrow">Tickets resolved</span><strong>${selected.ticketsResolved}</strong><small>${state.staffQueueFilter === "all" ? `${selected.queueCount} queues` : `${staffCount} staff assigned`}</small></article><article><span class="eyebrow">SLA breaches</span><strong>${selected.slaBreaches}</strong><small>Exceeded the target</small></article><article><span class="eyebrow">SLA met</span><strong>${selected.sla}</strong><small>Resolved within SLA</small></article></section><article class="queue-trend-panel queue-business-trend-panel"><div class="panel-head"><div><span class="eyebrow">Business operations graph</span><h3>Ticket intake · ${period.label}</h3></div><strong>${selected.ticketsReceived} received</strong></div><div class="queue-trend-chart"><svg viewBox="0 0 246 108" role="img" aria-label="Ticket intake trend for ${escapeHtml(selectedQueueLabel)} during ${escapeHtml(period.label)}"><line x1="18" y1="90" x2="228" y2="90"></line><line x1="18" y1="60" x2="228" y2="60"></line><line x1="18" y1="30" x2="228" y2="30"></line><polygon points="${trendArea}"></polygon><polyline points="${trendPoints}"></polyline>${trendValues.map((value, index) => `<circle cx="${18 + (index * pointStep)}" cy="${90 - Math.round((value / trendMaximum) * 60)}" r="3"></circle>`).join("")}</svg><div class="queue-trend-labels" style="grid-template-columns: repeat(${period.graphLabels.length}, 1fr);">${period.graphLabels.map((label) => `<span>${label}</span>`).join("")}</div></div></article></section>`;
+    ? "A consolidated view of every support queue and the support agent directory."
+    : `Business operations and assigned support agents for ${selectedQueueLabel}.`;
+  return `<section class="queue-dashboard" aria-labelledby="queue-dashboard-title"><div class="queue-dashboard-head"><div><span class="eyebrow">Queue operations</span><h2 id="queue-dashboard-title">${escapeHtml(selectedQueueLabel)}</h2><p>${escapeHtml(selectionDescription)}</p></div><div class="queue-dashboard-controls"><label class="queue-dashboard-filter" for="queue-dashboard-filter"><span>Dashboard queue</span><select id="queue-dashboard-filter" aria-label="Dashboard queue" data-staff-queue-filter>${queueOptions}</select></label><div class="queue-period-control"><span>Reporting period</span><div class="metric-period-switcher" role="group" aria-label="Select queue dashboard reporting period">${periodControls}</div></div></div></div><section class="queue-kpi-grid" aria-label="Selected queue operational metrics"><article><span class="eyebrow">Tickets received</span><strong>${selected.ticketsReceived}</strong><small>${period.label}</small></article><article><span class="eyebrow">Tickets resolved</span><strong>${selected.ticketsResolved}</strong><small>${state.staffQueueFilter === "all" ? `${selected.queueCount} queues` : `${staffCount} support agents assigned`}</small></article><article><span class="eyebrow">SLA breaches</span><strong>${selected.slaBreaches}</strong><small>Exceeded the target</small></article><article><span class="eyebrow">SLA met</span><strong>${selected.sla}</strong><small>Resolved within SLA</small></article></section><article class="queue-trend-panel queue-business-trend-panel"><div class="panel-head"><div><span class="eyebrow">Business operations graph</span><h3>Ticket intake · ${period.label}</h3></div><strong>${selected.ticketsReceived} received</strong></div><div class="queue-trend-chart"><svg viewBox="0 0 246 108" role="img" aria-label="Ticket intake trend for ${escapeHtml(selectedQueueLabel)} during ${escapeHtml(period.label)}"><line x1="18" y1="90" x2="228" y2="90"></line><line x1="18" y1="60" x2="228" y2="60"></line><line x1="18" y1="30" x2="228" y2="30"></line><polygon points="${trendArea}"></polygon><polyline points="${trendPoints}"></polyline>${trendValues.map((value, index) => `<circle cx="${18 + (index * pointStep)}" cy="${90 - Math.round((value / trendMaximum) * 60)}" r="3"></circle>`).join("")}</svg><div class="queue-trend-labels" style="grid-template-columns: repeat(${period.graphLabels.length}, 1fr);">${period.graphLabels.map((label) => `<span>${label}</span>`).join("")}</div></div></article></section>`;
 }
 
 function renderAdminUsers() {
@@ -3198,9 +3198,9 @@ function renderAdminUsers() {
   const cards = displayedUsers.length ? displayedUsers.map((user) => {
     const resolvedMonth = user.resolved.month;
     return `<article class="staff-card"><div class="staff-card-top"><span class="staff-avatar">${escapeHtml(getProfileInitials(user))}</span><div class="staff-card-identity"><h2>${escapeHtml(getProfileDisplayName(user))}</h2><p>${escapeHtml(user.title)}</p></div><span class="staff-status ${staffStatusClass(user.status)}"><i></i>${escapeHtml(user.status)}</span></div><div class="staff-card-queue"><span class="eyebrow">Assigned queue</span><strong>${escapeHtml(user.queue)}</strong></div><div class="staff-card-metrics"><div><span>Active</span><strong>${user.activeTickets}</strong></div><div><span>Reply needed</span><strong>${user.waitingReply}</strong></div><div><span>Resolved this month</span><strong>${resolvedMonth.count}</strong></div></div><div class="staff-card-footer"><span>${escapeHtml(user.email)}</span><button class="button secondary" type="button" data-action="view-staff-user" data-staff-id="${user.id}">View details</button></div></article>`;
-  }).join("") : `<div class="staff-directory-empty"><strong>No staff match this queue.</strong><p>Select another queue or choose All queues to view the full team.</p></div>`;
+  }).join("") : `<div class="staff-directory-empty"><strong>No support agents match this queue.</strong><p>Select another queue or choose All queues to view the full team.</p></div>`;
   const selectedQueueLabel = state.staffQueueFilter === "all" ? "All queues" : state.staffQueueFilter;
-  return `<div class="page-heading staff-directory-heading"><div><span class="eyebrow">Administration</span><h1>Queues &amp; staff</h1><p>Monitor queue workload, then manage the people assigned to each support area.</p></div></div>${renderQueueDashboard()}<section class="staff-directory-section"><div class="staff-directory-section-head"><div><span class="eyebrow">Staff directory</span><h2>${escapeHtml(selectedQueueLabel)}</h2><p>Staff members assigned to the queue selected above.</p></div><div class="heading-actions"><button class="button signal" type="button" data-action="create-staff-user">Add staff member</button></div></div><section class="staff-directory-toolbar panel"><span class="staff-directory-selection">Selected in queue dashboard: <strong>${escapeHtml(selectedQueueLabel)}</strong></span><span class="staff-directory-count"><strong>${displayedUsers.length}</strong> of ${staffUsers.length} staff members</span></section><section class="staff-card-grid">${cards}</section></section>${state.staffUserDialog ? renderStaffUserDialog(state.staffUserDialog) : ""}`;
+  return `<div class="page-heading staff-directory-heading"><div><span class="eyebrow">Administration</span><h1>Queues &amp; support agents</h1><p>Monitor queue workload, then manage the people assigned to each support area.</p></div></div>${renderQueueDashboard()}<section class="staff-directory-section"><div class="staff-directory-section-head"><div><span class="eyebrow">Support agent directory</span><h2>${escapeHtml(selectedQueueLabel)}</h2><p>Support agents assigned to the queue selected above.</p></div><div class="heading-actions"><button class="button signal" type="button" data-action="create-staff-user">Add support agent</button></div></div><section class="staff-directory-toolbar panel"><span class="staff-directory-selection">Selected in queue dashboard: <strong>${escapeHtml(selectedQueueLabel)}</strong></span><span class="staff-directory-count"><strong>${displayedUsers.length}</strong> of ${staffUsers.length} support agents</span></section><section class="staff-card-grid">${cards}</section></section>${state.staffUserDialog ? renderStaffUserDialog(state.staffUserDialog) : ""}`;
 }
 
 function renderAdmin() {
@@ -3596,12 +3596,12 @@ document.addEventListener("click", (event) => {
   if (action === "confirm-delete-staff-user") {
     const userId = event.target.closest("[data-staff-id]").dataset.staffId;
     if (serverSessionIsActive()) {
-      if (window.confirm("Deactivate this staff account? It will no longer be able to sign in or receive new tickets.")) void deactivateServerStaffUser(userId);
+      if (window.confirm("Deactivate this support agent account? It will no longer be able to sign in or receive new tickets.")) void deactivateServerStaffUser(userId);
       return;
     }
     const index = staffUsers.findIndex((user) => user.id === userId);
     if (index === -1) {
-      showToast("That staff member is no longer available.");
+      showToast("That support agent is no longer available.");
       return;
     }
     const [removedUser] = staffUsers.splice(index, 1);
@@ -3610,7 +3610,7 @@ document.addEventListener("click", (event) => {
     state.staffUserDialog = null;
     state.staffDeleteConfirmId = null;
     render();
-    showToast(`${getProfileDisplayName(removedUser)} was removed from the staff directory.`);
+    showToast(`${getProfileDisplayName(removedUser)} was removed from the support agent directory.`);
     return;
   }
   if (action === "set-admin-activity-view") {
@@ -4031,12 +4031,12 @@ document.addEventListener("submit", (event) => {
     const queue = String(formData.get("staff-queue") || "");
     const userId = form.dataset.staffId;
     if (!firstName || !lastName || !email || !title || !queue) {
-      showToast("Complete the staff name, email, role title, and assigned queue.");
+      showToast("Complete the support agent name, email, role title, and assigned queue.");
       return;
     }
     const duplicateEmail = staffUsers.some((user) => user.id !== userId && user.email.toLowerCase() === email);
     if (duplicateEmail) {
-      showToast("A staff member with this email address already exists.");
+      showToast("A support agent with this email address already exists.");
       return;
     }
     if (userId === "new") {
@@ -4066,7 +4066,7 @@ document.addEventListener("submit", (event) => {
     }
     const user = getStaffUser(userId);
     if (!user) {
-      showToast("That staff member is no longer available.");
+      showToast("That support agent is no longer available.");
       return;
     }
     Object.assign(user, { firstName, lastName, email, phone, title, queue });
@@ -4078,7 +4078,7 @@ document.addEventListener("submit", (event) => {
       roleDefinitions.staff.title = queue;
     }
     render();
-    showToast(`${firstName} ${lastName}'s staff record was updated.`);
+    showToast(`${firstName} ${lastName}'s support agent record was updated.`);
     return;
   }
   if (event.target.id === "admin-force-close-form") {
@@ -4089,7 +4089,7 @@ document.addEventListener("submit", (event) => {
       showToast("Enter a closure reason before force closing this ticket.");
       return;
     }
-    if (!window.confirm(`Force close ${ticketId}? The customer and staff will no longer be able to reopen it.`)) return;
+    if (!window.confirm(`Force close ${ticketId}? The customer and support agents will no longer be able to reopen it.`)) return;
     if (serverSessionIsActive()) {
       void forceCloseServerTicket(ticketId, reason);
       return;

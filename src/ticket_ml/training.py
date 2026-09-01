@@ -343,6 +343,8 @@ def _pipeline(
     type_weight: int = 0,
     max_features: int = 150_000,
 ) -> Pipeline:
+    """ Preprocess tickets and convert to TF-IDF features before fitting the classifier. """
+    
     return Pipeline(
         [
             (

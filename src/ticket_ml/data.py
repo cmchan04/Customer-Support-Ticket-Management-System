@@ -55,9 +55,12 @@ def _normalise_text(series: pd.Series) -> pd.Series:
 
 def load_and_prepare(config: TrainingConfig) -> PreparedDataset:
     """Load, validate, filter, and deduplicate tickets before every training run."""
+
+    # Validate the dataset file to ensure needed columns are present and load the raw CSV.
     if not config.dataset_path.is_file():
         raise FileNotFoundError(f"Dataset not found: {config.dataset_path}")
 
+    # Read the CSV and check for required columns.
     raw = pd.read_csv(config.dataset_path)
     missing_columns = sorted(set(REQUIRED_COLUMNS) - set(raw.columns))
     if missing_columns:
@@ -65,14 +68,14 @@ def load_and_prepare(config: TrainingConfig) -> PreparedDataset:
             f"Dataset is missing required columns: {', '.join(missing_columns)}"
         )
 
+    # Filter to English tickets
     english = raw.loc[raw["language"].fillna("").astype(str).str.casefold().eq("en")].copy()
+
+    # Prepare the dataset by normalizing text
     prepared = pd.DataFrame(
         {
             "subject": _normalise_text(english["subject"]),
             "body": _normalise_text(english["body"]),
-            # ``type`` is customer-selectable in the deployed form. Older
-            # fixture files may omit it, so preserve compatibility with an
-            # explicit unknown category rather than inventing a label.
             "type": _normalise_text(english["type"])
             if "type" in english
             else pd.Series("Unknown", index=english.index, dtype="string"),
@@ -80,12 +83,19 @@ def load_and_prepare(config: TrainingConfig) -> PreparedDataset:
             "priority": _normalise_text(english["priority"]),
         }
     )
+
+    # Replace empty type values with "Unknown" to ensure consistency in the dataset.
     prepared["type"] = prepared["type"].replace("", "Unknown")
+
+    # Optional queue label remapping
     if config.queue_label_map:
         prepared["queue"] = prepared["queue"].replace(dict(config.queue_label_map))
+
+    # Remove rows with empty subject, body, queue, or priority fields to ensure data integrity.
     valid_rows = prepared["body"].ne("") & prepared["queue"].ne("") & prepared["priority"].ne("")
     prepared = prepared.loc[valid_rows].copy()
 
+    # Label Consistency Check: Ensure that identical subject/body text does not have conflicting queue or priority labels.
     label_counts = prepared.groupby(["subject", "body"], dropna=False)[
         ["queue", "priority"]
     ].nunique()
@@ -95,6 +105,7 @@ def load_and_prepare(config: TrainingConfig) -> PreparedDataset:
             "resolve these records before training."
         )
 
+    # Duplicate Removal: Remove duplicate tickets based on subject/body text, only keep the first occurrence.
     before_deduplication = len(prepared)
     prepared = prepared.drop_duplicates(subset=["subject", "body"], keep="first").reset_index(
         drop=True
