@@ -343,6 +343,8 @@ def _pipeline(
     type_weight: int = 0,
     max_features: int = 150_000,
 ) -> Pipeline:
+    """ Preprocess tickets and convert to TF-IDF features before fitting the classifier. """
+    
     return Pipeline(
         [
             (
@@ -475,6 +477,7 @@ def _train_type_svm_target(
     baseline.fit(split.x_train, target_train)
     baseline_metrics = score_predictions(target_test, baseline.predict(split.x_test))
 
+    # Cross-validation search for the best type weight and SVM C parameter.
     search = GridSearchCV(
         estimator=_pipeline(
             LinearSVC(class_weight="balanced", random_state=config.random_seed),

@@ -66,9 +66,13 @@ def preprocess_ticket_text(
     subject_text = "" if pd.isna(subject) else str(subject)
     body_text = "" if pd.isna(body) else str(body)
     type_text = "" if pd.isna(ticket_type) else str(ticket_type)
+
+    # Combine subject, body, and type text with the specified weights
     raw_text = " ".join(
         [subject_text] * subject_weight + [body_text] + [type_text] * type_weight
     )
+
+    # Normalize whitespace, remove URLs, punctuation, and non-alphanumeric characters, and convert to lowercase.
     text = re.sub(r"\\[nrt]+", " ", raw_text)
     text = re.sub(r"[\r\n\t]+", " ", text)
     text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
@@ -103,8 +107,6 @@ class TicketTextPreprocessor(BaseEstimator, TransformerMixin):
 
     def transform(self, x: pd.DataFrame) -> list[str]:
         self._validate_input(x)
-        # Models saved before subject weighting was introduced do not contain
-        # this attribute. Defaulting to 1 preserves their original behaviour.
         subject_weight = getattr(self, "subject_weight", 1)
         type_weight = getattr(self, "type_weight", 0)
         subjects: Iterable[object] = x["subject"]

@@ -1,8 +1,8 @@
-# Customer Support Ticket Management System
+# Customer Support Ticket Management System - Chan Chun Ming TP068983
 
 This repository contains the English customer-support ticket classification and
-priority-prediction pipeline for the FYP. It includes a text-only baseline and
-an optional type-aware model that also accepts a customer-selected ticket type.
+priority-prediction pipeline for Final Year Project. It includes a text-only baseline and
+an multiple experiments model that also accepts a customer-selected ticket type.
 
 ## Prerequisites and one-time setup
 
@@ -108,27 +108,13 @@ ticket-ml eda --config configs\training.toml
 
 Train and evaluate all candidate models. This compares Logistic Regression,
 Multinomial Naive Bayes, global and type-aware Linear SVMs, Decision Tree, and
-CPU-based XGBoost separately for `queue` and `priority`:
+CPU-based XGBoost separately for `queue` and `priority` (Note: This might take quite long time
+based on your CPU specification):
 
 ```powershell
 ticket-ml train --config configs\training.toml
 ```
 
-### Archived subject-weighting experiment
-
-The `tune-weighting` command and its configuration have been retired because
-five-fold cross-validation selected the unchanged 1:1 subject-to-body ratio for
-both targets. Repeating the subject (2:1, 3:1, or 4:1) consistently made the
-model worse. The final word-and-character variant reached 73.90% queue accuracy
-(below the 74.27% text-only baseline) and 75.61% priority accuracy (only 0.15
-percentage points above the 75.46% baseline). It is therefore not part of the
-active training workflow.
-
-Its explanation and disabled source snapshot are in
-[`archive/subject_weighting/`](archive/subject_weighting/). The saved pipelines
-and evaluation reports have been moved to
-`archive/subject_weighting/`; they are retained only for historical comparison
-and are not loaded by `ticket-ml predict`.
 
 Run the ticket-type experiment. It uses the customer-selected `Incident`,
 `Request`, `Problem`, or `Change` value, searches type weight, SVM C, and word
@@ -274,21 +260,6 @@ active family selected for new submissions is still controlled by the Django
 deployment record; in the current database, Joint remains active and Separate
 remains available as the fixed alternative.
 
-### Migrating the database queue taxonomy
-
-The one-time migration combines existing `IT Support` records with
-`Technical Support`. It moves tickets and staff assignments, normalizes the
-stored prediction labels and reroute history, records an audit event, and
-removes the obsolete queue:
-
-```powershell
-python web\manage.py merge_support_queues
-python web\manage.py merge_support_queues --apply
-```
-
-The first command previews the counts; the second applies the transaction.
-Future demo-data seeders use the nine-queue taxonomy and will not recreate
-`IT Support`.
 
 ### Promoting and archiving the merged deployments
 
@@ -310,7 +281,7 @@ unified workspace archive: retired experiments are in
 `model_family`, `model_version`, and prediction record; only future submissions
 use the selected active family and the promoted artifacts.
 
-### Interactive terminal menu
+### Interactive terminal menu (Just for testing when UI is still not built)
 
 Open the local menu for prediction and model retraining:
 
@@ -419,7 +390,7 @@ python web\manage.py test web.tickets
 python -m ruff check src tests web
 ```
 
-## Training outputs and current result
+## Training outputs
 
 Training uses an 80/20 train/test split with the configured random seed in
 `configs/training.toml`, then uses five-fold stratified cross-validation on the
@@ -438,34 +409,3 @@ Reports, confusion matrices, ROC/precision-recall plots, and misclassification
 samples are written to `resources/model_output/`. Training replaces the model
 and report files with results from the new run.
 
-When an SVM wins, `train` now fits its probability calibration only after
-cross-validation selects the winning configuration. The calibration uses three
-stratified folds inside the training 80%, while the 20% holdout remains unseen.
-The final saved model is then recalibrated on the complete validated dataset.
-Its settings and the resulting `confidence_method` are recorded in
-`artifacts/models/metadata.json`. The equivalent process is used by
-`ticket-ml tune-joint-type` for `artifacts/models/joint/`.
-
-If `metadata.json` selects `linear_svm_by_type`, the deployed form must supply
-the same four-value `type` field used during training. The normal `train`
-command also applies the queue calibration step when this candidate wins. If
-the form only has subject and body, deploy a text-only selected pipeline
-instead.
-
-The stored baseline run (before Decision Tree and XGBoost were added) selected
-Linear SVM for both targets on the current seed-29 split, with word 1--3 grams
-and `C=10`:
-
-| Target | Holdout accuracy | Macro F1 |
-| --- | ---: | ---: |
-| Queue | 74.27% | 75.17% |
-| Priority | 75.46% | 75.00% |
-
-High-priority recall is 78.98%. The configured 90% accuracy quality gate does
-not currently pass, so the result must not be presented as a 90%-accurate
-model. Run the training command again to compare all seven candidate variants; it will
-replace `resources/model_output/metrics.json` with the updated candidate
-comparison and selected-model metrics. XGBoost is explicitly configured for
-CPU use, matching the rest of this project. Its default comparison uses a
-laptop-appropriate 100-tree, depth-6 configuration; its parameters can be
-adjusted in `configs/training.toml` if you later need a separate tuning study.

@@ -1,13 +1,3 @@
-# Django backend
-
-This directory is the database-backed implementation of the Solve Your
-Inquiries desktop workspace. The established `web/ui-prototype/` design is now
-the authenticated Django shell, so users see the same desktop UI after they
-sign in. It remains openable as a standalone design prototype; when served by
-Django, the server injects the real account identity and session-safe logout
-behaviour. The JSON endpoints below are the seam for replacing the remaining
-demonstration arrays with SQLite data.
-
 ## One-time setup
 
 From the repository root, activate the existing environment and install the
